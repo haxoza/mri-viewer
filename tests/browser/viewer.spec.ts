@@ -29,6 +29,24 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByText('7 frames imported')).toBeVisible();
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
+  const examination = page.getByRole('button', {
+    name: 'Examination Synthetic examination',
+    exact: true,
+  });
+  const stack = page.getByRole('button', { name: 'Stack Synthetic volume 1 Axial 1', exact: true });
+  const openStack = page.getByRole('button', {
+    name: 'Open Synthetic volume 1 Axial 1',
+    exact: true,
+  });
+  await expect(stack).toHaveCount(0);
+  await expect(page.locator('.study-list .stack')).toHaveCount(0);
+  await examination.click();
+  await expect(openStack).toBeHidden();
+  await examination.focus();
+  await page.keyboard.press('Enter');
+  await expect(openStack).toBeVisible();
+  await openStack.click();
+  await expect(page.getByLabel('Slice number')).toHaveValue('4');
   await page.getByRole('button', { name: 'Next slice', exact: true }).click();
   await expect(page.getByLabel('Slice number')).toHaveValue('5');
   await page.getByLabel('Image pane 1.', { exact: false }).focus();
@@ -170,6 +188,16 @@ test('Enhanced MR separates spatial and temporal controls', async ({ page }) => 
     buffer: Buffer.from(enhancedDicom()),
   });
   await expect(page.getByLabel('Slice number')).toHaveValue('2');
+  const sequence = page.locator('.series > .foldable-header .foldable-toggle');
+  const stack = page.locator('button.stack').first();
+  await expect(stack).toHaveAttribute('title', 'Click to open stack');
+  await expect(stack).toContainText('Axial · Stack 1');
+  await sequence.click();
+  await expect(stack).toBeHidden();
+  await sequence.focus();
+  await page.keyboard.press('Enter');
+  await expect(stack).toBeVisible();
+  await stack.click();
   await expect(page.locator('.pane-bottom')).toContainText('Slice 2 / 3');
   await page.getByRole('combobox', { name: 'Time', exact: true }).selectOption({ label: '2' });
   await expect(page.locator('.pane-bottom')).toContainText('Slice 2 / 3');

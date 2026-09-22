@@ -1,6 +1,6 @@
 # MRI viewer implementation plan
 
-Status: proposed implementation, incorporating confirmed first-version scope: desktop and tablet touch support, folder/file/ZIP import, linked scrolling, cine, MPR, and DICOM studies/series only. Research and local sample inspection: 2026-09-22. This document plans implementation; it does not claim browser rendering or performance has been verified.
+Status: application implementation is now available; see [implementation and validation status](../implementation-status.md) for completed checks and outstanding release acceptance. The original plan below incorporates confirmed first-version scope: desktop and tablet touch support, folder/file/ZIP import, linked scrolling, cine, MPR, and DICOM studies/series only. Research and local sample inspection: 2026-09-22. This document plans implementation; it does not claim browser rendering or performance has been verified.
 
 ## 1. Recommendation and feasibility
 
@@ -299,4 +299,4 @@ Resource assumptions are authorized: use the provisional 8 GiB desktop / 4 GiB t
 
 The repository was already initialized with an initial commit; its history was preserved. Added `.gitignore` before copying the private sample into `local-data/dicom/`. The private directory and common medical extensions are ignored. All real files, including extensionless DICOM, PDFs, archives, derived exports, and metadata dumps, must remain in ignored private directories. `.gitignore` can be bypassed with force-add, so review tracked files and add a medical-data guard to the implementation's commit/CI checks.
 
-No viewer application, build setup, or browser tests have been implemented in this planning step.
+The initial planning step did not include application code. The subsequent implementation adds the viewer, build setup, linting, synthetic tests, and opt-in private-sample checks; current evidence and release gaps are recorded in [implementation status](../implementation-status.md).

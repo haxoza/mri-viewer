@@ -1,0 +1,48 @@
+{
+  "name": "local-mri-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "check:privacy": "node scripts/check-privacy.mjs",
+    "check": "npm run lint && npm run test && npm run build && npm run check:privacy",
+    "lint": "oxlint --deny-warnings src tests vite.config.ts playwright.config.ts",
+    "format": "oxfmt src tests scripts vite.config.ts playwright.config.ts",
+    "notices": "node scripts/dependency-notices.mjs"
+  },
+  "dependencies": {
+    "@cornerstonejs/core": "5.10.8",
+    "@cornerstonejs/dicom-image-loader": "5.10.8",
+    "@cornerstonejs/metadata": "5.10.8",
+    "@zip.js/zip.js": "2.17.0",
+    "dcmjs": "0.52.0",
+    "dicom-parser": "1.8.21",
+    "events": "3.3.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "url": "0.11.4",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  },
+  "overrides": {
+    "adm-zip": "0.6.1",
+    "fflate": "0.7.5",
+    "uuid": "11.1.1"
+  }
+}

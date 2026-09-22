@@ -1,10 +1,4 @@
-import {
-  Enums,
-  RenderingEngine,
-  StackViewport,
-  VolumeViewport,
-  type Types,
-} from '@cornerstonejs/core';
+import { Enums, StackViewport, VolumeViewport, type Types } from '@cornerstonejs/core';
 import { controllers, crosshairs, pause } from '../../imaging/rendering/controller';
 import { useSession } from '../../app/store';
 import { volumes } from '../../imaging/rendering/volumes';
@@ -67,17 +61,29 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
   const scale = Math.min(options.width / bounds.width, options.height / bounds.height),
     ox = (options.width - bounds.width * scale) / 2,
     oy = (options.height - bounds.height * scale) / 2;
-  const engine = new RenderingEngine(`export-${crypto.randomUUID()}`);
+  // Volume textures belong to the viewer's WebGL context. A separate engine
+  // cannot reuse them and renders black MPR images.
+  const engine = selected[0].viewport!.getRenderingEngine();
+  const id = `export-${crypto.randomUUID()}`;
   const holder = document.createElement('div');
   holder.style.cssText = 'position:fixed;left:-20000px;top:0;pointer-events:none;';
   document.body.append(holder);
+  const releaseViewport = () => {
+    if (!engine.getViewport(id)) return;
+    // Shrink the shared GPU buffer while the export viewport is still registered.
+    // Removing a large viewport alone leaves the buffer larger than the pool's
+    // recorded size, so subsequent pane renders copy from the wrong region.
+    holder.style.width = '1px';
+    holder.style.height = '1px';
+    engine.resize(false, true);
+    engine.disableElement(id);
+  };
   try {
     for (const s of snapshots) {
       const w = Math.max(1, Math.round(s.rect.width * scale)),
         h = Math.max(1, Math.round(s.rect.height * scale));
       holder.style.width = `${w / devicePixelRatio}px`;
       holder.style.height = `${h / devicePixelRatio}px`;
-      const id = 'export-pane';
       engine.enableElement({
         viewportId: id,
         element: holder,
@@ -137,7 +143,7 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
           context.stroke();
         }
       }
-      engine.disableElement(id);
+      releaseViewport();
     }
     const mime = options.format === 'png' ? 'image/png' : 'image/jpeg';
     const blob = await new Promise<Blob>((resolve, reject) =>
@@ -155,7 +161,7 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
     if (!valid) throw new Error('Export dimensions did not match.');
     return blob;
   } finally {
-    engine.destroy();
+    releaseViewport();
     holder.remove();
     canvas.width = 0;
     canvas.height = 0;

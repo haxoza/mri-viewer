@@ -92,7 +92,153 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   expect(d.suggestedFilename()).toBe('mri-view.png');
   const image = await readFile((await d.path())!);
   expect([image.readUInt32BE(16), image.readUInt32BE(20)]).toEqual([800, 600]);
+  await expectImagePixels(page, image);
+  const regions = await page.locator('.imaging-canvas').evaluateAll((elements) => {
+    const bounds = document.querySelector('.workspace')!.getBoundingClientRect();
+    return elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        x: (rect.left - bounds.left) / bounds.width,
+        y: (rect.top - bounds.top) / bounds.height,
+        width: rect.width / bounds.width,
+        height: rect.height / bounds.height,
+      };
+    });
+  });
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByLabel(/^Capture/).selectOption('workspace');
+  await page.getByLabel(/^Format/).selectOption('jpeg');
+  await page.getByRole('button', { name: '2×', exact: true }).click();
+  const workspaceDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download image' }).click();
+  const jpeg = await workspaceDownload;
+  expect(jpeg.suggestedFilename()).toBe('mri-view.jpg');
+  await expectImagePixels(page, await readFile((await jpeg.path())!), regions);
+  // Export cleanup must leave the viewer's shared volume and engine usable.
+  await page.getByLabel('Image pane 1.', { exact: false }).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.pane-status')).toHaveCount(0);
+  for (const canvas of await page.locator('.imaging-canvas canvas').all()) {
+    const pixels = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL());
+    await expectImagePixels(page, Buffer.from(pixels.split(',')[1], 'base64'));
+  }
   expect(external).toEqual([]);
+});
+
+async function expectImagePixels(
+  page: Page,
+  image: Buffer,
+  regions = [{ x: 0, y: 0, width: 1, height: 1 }],
+) {
+  const litFractions = await page.evaluate(
+    async ({ base64, regions }) => {
+      const blob = new Blob([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))]);
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      return regions.map((region) => {
+        const pixels = context.getImageData(
+          Math.round(region.x * canvas.width),
+          Math.round(region.y * canvas.height),
+          Math.round(region.width * canvas.width),
+          Math.round(region.height * canvas.height),
+        ).data;
+        let lit = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i] > 30 && pixels[i + 1] > 30 && pixels[i + 2] > 30) lit++;
+        }
+        return lit / (pixels.length / 4);
+      });
+    },
+    { base64: image.toString('base64'), regions },
+  );
+  for (const litFraction of litFractions) expect(litFraction).toBeGreaterThan(0.05);
+}
+
+test('MPR export preserves every pane when rendered again', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Open DICOM files').setInputFiles(files);
+  await expect(page.getByLabel('Slice number')).toHaveValue('4');
+  await page.getByRole('button', { name: 'MPR', exact: true }).click();
+  await expect(page.locator('.pane-status')).toHaveCount(0);
+  await expect(page.getByText('coronal · reconstruction')).toBeVisible();
+  for (const index of [1, 2, 3]) {
+    await page.getByLabel(`Image pane ${index}.`, { exact: false }).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('.pane-status')).toHaveCount(0);
+  }
+  // Snap the shared crosshair to each plane's slice grid before comparing pixels.
+  for (const index of [1, 2, 3]) {
+    await page.getByLabel(`Image pane ${index}.`, { exact: false }).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('.pane-status')).toHaveCount(0);
+    await page.keyboard.press('ArrowUp');
+    await expect(page.locator('.pane-status')).toHaveCount(0);
+  }
+  await page.getByLabel('Image pane 1.', { exact: false }).focus();
+  const pixels = () =>
+    page
+      .locator('.imaging-canvas canvas')
+      .evaluateAll((elements) =>
+        Promise.all(
+          elements.map(async (element) =>
+            Array.from(
+              new Uint8Array(
+                await crypto.subtle.digest(
+                  'SHA-256',
+                  new TextEncoder().encode((element as HTMLCanvasElement).toDataURL()),
+                ),
+              ),
+            ).join(','),
+          ),
+        ),
+      );
+  // Let scheduled renders finish before capturing the reference pixels.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const before = await pixels();
+  const positions = await page.locator('.pane-bottom').allTextContents();
+  for (const scope of ['active', 'workspace']) {
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    await page.getByLabel(/^Capture/).selectOption(scope);
+    await page.getByRole('button', { name: '2×', exact: true }).click();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download image' }).click();
+    await download;
+    expect(await pixels()).toEqual(before);
+    expect(await page.locator('.pane-bottom').allTextContents()).toEqual(positions);
+    // Repaint each pane without changing its final slice.
+    for (const index of [1, 2, 3]) {
+      await page.getByLabel(`Image pane ${index}.`, { exact: false }).focus();
+      await page.keyboard.press('ArrowDown');
+      await expect(page.locator('.pane-status')).toHaveCount(0);
+      await page.keyboard.press('ArrowUp');
+      await expect(page.locator('.pane-status')).toHaveCount(0);
+    }
+    await expect.poll(pixels).toEqual(before);
+    await page.getByLabel('Image pane 1.', { exact: false }).focus();
+  }
+});
+
+test('stack exports contain slice pixels in PNG and JPEG', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Open DICOM files').setInputFiles(files);
+  await expect(page.locator('.pane-bottom')).toContainText('Slice 4 / 7');
+  for (const format of ['png', 'jpeg']) {
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    await page.getByLabel(/^Format/).selectOption(format);
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download image' }).click();
+    await expectImagePixels(page, await readFile((await (await download).path())!));
+  }
 });
 test('metadata and keyboard focus do not navigate the viewer', async ({ page }) => {
   await page.goto('/');

@@ -600,19 +600,37 @@ main {
   margin-top: 3px;
 }
 .study-title {
-  display: flex;
-  gap: 8px;
-  align-items: start;
-  padding: 0 8px 15px;
+  min-width: 0;
 }
-.study-title > div {
-  flex: 1;
+.study-title strong {
+  display: block;
+  margin-bottom: 5px;
 }
-.study-title button {
+.study-remove {
   padding: 0 9px;
-  min-height: 32px;
   background: transparent;
   border-color: transparent;
+}
+.foldable-header {
+  display: flex;
+  align-items: start;
+}
+.foldable-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  background: transparent;
+  border-color: transparent;
+}
+.foldable-chevron {
+  flex: 0 0 12px;
+  color: var(--muted);
 }
 .series {
   border: 1px solid #25313e;
@@ -624,7 +642,7 @@ main {
 .series-title {
   display: flex;
   gap: 10px;
-  padding: 13px 12px;
+  align-items: center;
 }
 .series-title strong {
   font-weight: 500;
@@ -644,8 +662,8 @@ main {
   color: #9eb0c2;
 }
 .series-set {
-  width: calc(100% - 12px);
-  margin: 0 6px 6px;
+  width: 100%;
+  margin: 0 0 6px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -658,6 +676,14 @@ main {
 }
 .series-set small {
   font-size: 10px;
+}
+.series-set.stack {
+  width: calc(100% - 12px);
+  margin: 0 6px 6px;
+}
+.series-set.single-stack {
+  margin-bottom: 10px;
+  border-color: var(--line);
 }
 .arrow {
   color: #789990;

@@ -47,6 +47,8 @@ export default defineConfig({
   },
   worker: { format: 'es' },
   server: {
+    // Polling also detects edits when filesystem events do not reach the dev process.
+    watch: { usePolling: true, interval: 300 },
     fs: {
       strict: true,
       deny: ['**/local-data/**', '**/exports/**', '**/test-data/**', '**/.git/**', '**/.env*'],

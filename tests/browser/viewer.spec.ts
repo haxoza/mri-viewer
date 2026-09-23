@@ -228,6 +228,88 @@ test('MPR export preserves every pane when rendered again', async ({ page }) => 
   }
 });
 
+for (const mode of ['stack', 'MPR', 'single MPR']) {
+  test(`window resize preserves slices and navigation in ${mode}`, async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel('Open DICOM files').setInputFiles(files);
+    await expect(page.getByLabel('Slice number')).toHaveValue('4');
+    if (mode !== 'stack') {
+      await page.getByRole('button', { name: 'MPR', exact: true }).click();
+      await expect(page.getByText('coronal · reconstruction')).toBeVisible();
+      await expect(page.locator('.pane-status')).toHaveCount(0);
+      if (mode === 'single MPR') await page.getByLabel('Layout').selectOption('single');
+    }
+    const settle = async () => {
+      await expect(page.locator('.pane-status')).toHaveCount(0);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+    };
+    // Move away from the initial slices and align all reconstructed planes to
+    // the slice grid before recording their rendered images.
+    const paneCount = mode === 'MPR' ? 3 : 1;
+    for (let index = 1; index <= paneCount; index++) {
+      await page.getByLabel(`Image pane ${index}.`, { exact: false }).focus();
+      await page.keyboard.press('ArrowDown');
+      await settle();
+    }
+    await page.getByRole('button', { name: 'Zoom', exact: true }).click();
+    const pane = page.getByLabel('Image pane 1.', { exact: false });
+    const rect = (await pane.boundingBox())!;
+    const x = rect.x + rect.width / 2,
+      y = rect.y + rect.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - 30, { steps: 3 });
+    await page.mouse.up();
+    await settle();
+    await page.getByLabel('Image pane 1.', { exact: false }).focus();
+    const pixels = () =>
+      page.locator('.imaging-canvas canvas').evaluateAll((canvases) =>
+        Promise.all(
+          canvases.map(async (canvas) => {
+            const digest = await crypto.subtle.digest(
+              'SHA-256',
+              new TextEncoder().encode((canvas as HTMLCanvasElement).toDataURL()),
+            );
+            return Array.from(new Uint8Array(digest)).join(',');
+          }),
+        ),
+      );
+    // Record the next slice too, so scrolling after resize must advance from
+    // the displayed slice instead of jumping back to stale navigation state.
+    await page.keyboard.press('ArrowDown');
+    await settle();
+    const next = await pixels();
+    await page.keyboard.press('ArrowUp');
+    await settle();
+    const before = await pixels();
+    const positions = await page.locator('.pane-bottom').allTextContents();
+    for (const size of [
+      { width: 1100, height: 800 },
+      { width: 1600, height: 1100 },
+      { width: 1440, height: 1000 },
+    ]) {
+      await page.setViewportSize(size);
+      await settle();
+      // Zoom is relative to the fitted image and can change with aspect ratio.
+      const slicePositions = (texts: string[]) => texts.map((text) => text.split('Zoom')[0]);
+      expect(slicePositions(await page.locator('.pane-bottom').allTextContents())).toEqual(
+        slicePositions(positions),
+      );
+    }
+    // Returning to the original dimensions makes an exact image comparison possible.
+    await expect.poll(pixels).toEqual(before);
+    expect(await page.locator('.pane-bottom').allTextContents()).toEqual(positions);
+    await page.keyboard.press('ArrowDown');
+    await settle();
+    await expect.poll(pixels).toEqual(next);
+  });
+}
+
 test('stack exports contain slice pixels in PNG and JPEG', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('Open DICOM files').setInputFiles(files);

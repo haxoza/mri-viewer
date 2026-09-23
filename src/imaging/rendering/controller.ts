@@ -41,7 +41,9 @@ export class ViewportController {
     if (this.element !== element) return;
     engine ??= new RenderingEngine('local-viewer');
     this.observer = new ResizeObserver(() => {
-      engine?.resize(true, false);
+      // MPR slice position is part of the camera. Resetting it here changes
+      // the rendered slice while leaving requested/displayed indices unchanged.
+      engine?.resize(true, true);
       engine?.render();
     });
     this.observer.observe(element);

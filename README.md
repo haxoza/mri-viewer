@@ -32,7 +32,9 @@ npm run preview
 - **MPR** opens axial, sagittal, and coronal reconstructions sharing one admitted volume. The viewport mode selector also assigns individual reconstructed planes. **Crosshair** moves the other planes to the selected point.
 - Cine supports speed, reverse, loop, bounce, and time playback at a fixed spatial position. Manual navigation pauses playback. Supplied frame timing is used at the default speed; changing speed scales it.
 - **Metadata** inspects a chosen source instance/frame, including nested sequences and private tags. The series summary identifies common versus varying fields.
-- **Export** renders an active pane or the imaging workspace to PNG/JPEG at the requested size. Position/crosshair overlays are opt-in. Identifiers burned into the source pixels remain in exports.
+- **Ellipse** draws red/yellow/cyan screen marks, with undo and clear. Marks stay fixed during navigation; they do not track anatomy.
+- **Export** opens a frozen preview of a pane or workspace. Refresh after changing output settings; PNG/JPEG downloads use the displayed capture. Identifiers burned into source pixels remain in exports.
+- **Agent tools** optionally exposes the live viewer through WebMCP. See [agent tools, privacy boundary and desktop verification](docs/webmcp.md).
 
 ## Limits and verification
 

@@ -1,3 +1,4 @@
+import { clearMarks } from '../../features/annotations/model';
 import {
   RenderingEngine,
   Enums,
@@ -214,6 +215,7 @@ export class ViewportController {
   async navigate(index: number, manual = true, linked = false) {
     const p = useSession.getState().panes[this.index];
     if (manual) pause(this.index);
+    if (this.abort?.signal.aborted) this.abort = new AbortController();
     if (!this.viewport || !p.total) return;
     index = clamp(index, p.total);
     this.wanted = index;
@@ -288,6 +290,17 @@ export class ViewportController {
         relative: s.geometry ? s.positions[p.displayed] - s.positions[0] : undefined,
       });
   }
+  cancelPending() {
+    this.generation++;
+    this.abort?.abort();
+    this.wanted = undefined;
+    patch(this.index, {
+      pending: false,
+      displayed: -1,
+      playing: false,
+      error: 'View operation cancelled. Retry or choose another position.',
+    });
+  }
   retry() {
     const p = useSession.getState().panes[this.index],
       s = getSet(p.setId);
@@ -313,6 +326,7 @@ export class ViewportController {
     v.render();
   }
   clear() {
+    clearMarks(this.index);
     this.generation++;
     this.abort?.abort();
     this.wanted = undefined;
@@ -395,29 +409,56 @@ let mprAbort: AbortController | undefined;
 export function cancelMpr() {
   mprAbort?.abort();
 }
-export async function openMpr() {
+export async function openMpr(signal?: AbortSignal) {
   const s = useSession.getState(),
     set = getSet(s.panes[s.active].setId);
   if (!set) return;
   pause();
   mprAbort?.abort();
   mprAbort = new AbortController();
+  const preparation = mprAbort;
+  const cancel = () => preparation.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
   try {
     notify('Preparing shared MPR volume…');
-    await volumes.prepare(set, s.profile, mprAbort.signal, (n) =>
+    await volumes.prepare(set, s.profile, preparation.signal, (n) =>
       notify(`Preparing shared MPR volume: ${n}%`),
     );
-    mprAbort.signal.throwIfAborted();
+    preparation.signal.throwIfAborted();
+    signal?.throwIfAborted();
     // Reserve all references before assigning, so replacing an existing pane cannot evict it.
     [0, 1, 2].forEach((i) => volumes.attach(set.id, i));
     changeLayout('left-3');
-    for (const [i, mode] of (['axial', 'sagittal', 'coronal'] as const).entries())
+    for (const [i, mode] of (['axial', 'sagittal', 'coronal'] as const).entries()) {
+      preparation.signal.throwIfAborted();
+      signal?.throwIfAborted();
       await controllers[i].assign(set.id, mode);
+    }
     if ([0, 1, 2].some((i) => useSession.getState().panes[i].error))
       throw new Error('A reconstructed pane could not initialize. Retry it or return to Stack.');
     notify('MPR ready. Reconstructed detail follows the original acquisition resolution.');
   } catch (error) {
     notify(error instanceof Error ? error.message : 'MPR preparation failed.');
+    if (signal) throw error;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    // Cancellation can leave reservations for planes that were never assigned.
+    // Only prune this preparation's reservations, not a newer MPR operation's.
+    if (mprAbort === preparation) {
+      const volume = volumes.volumes.get(set.id);
+      if (volume) {
+        for (const index of volume.refs) {
+          const pane = useSession.getState().panes[index];
+          if (
+            pane.setId !== set.id ||
+            pane.mode === 'stack' ||
+            !(controllers[index].viewport instanceof VolumeViewport)
+          )
+            volume.refs.delete(index);
+        }
+        if (!volume.refs.size) volumes.remove(set.id);
+      }
+    }
   }
 }
 const clocks = new Map<number, { last: number; frames: number; start: number }>();

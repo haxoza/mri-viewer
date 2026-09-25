@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Dialog } from '../../app/Dialog';
 import { useSession } from '../../app/store';
 import { controllers } from '../../imaging/rendering/controller';
-import { download, exportImage, type ExportOptions } from './service';
+import { download, type ExportOptions } from './service';
+import { captureDefaults, createCapture, useCapture } from './capture';
 export function ExportDialog({
   workspace,
   onClose,
@@ -10,23 +11,18 @@ export function ExportDialog({
   workspace: HTMLElement;
   onClose: () => void;
 }) {
-  const active = controllers[useSession.getState().active].element!;
-  const rect = active.getBoundingClientRect();
-  const [options, setOptions] = useState<ExportOptions>({
-    scope: 'active',
-    format: 'png',
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
-    quality: 0.92,
-    overlays: false,
-  });
+  const capture = useCapture((s) => s.capture);
+  const [options, setOptions] = useState<ExportOptions>(
+    () => capture?.options ?? captureDefaults(workspace),
+  );
+  const active = controllers[options.pane ?? useSession.getState().active].element;
   const [locked, setLocked] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const ratio = () => {
     const r =
       options.scope === 'active'
-        ? active.getBoundingClientRect()
+        ? (active ?? workspace).getBoundingClientRect()
         : workspace.getBoundingClientRect();
     return r.width / r.height;
   };
@@ -38,6 +34,20 @@ export function ExportDialog({
         if (!busy) onClose();
       }}
     >
+      {capture && (
+        <figure className="capture-preview">
+          <img src={capture.url} alt={`Frozen capture ${capture.id}`} />
+          <figcaption>
+            Capture {capture.id} · {capture.width} × {capture.height}
+            <br />
+            {capture.panes
+              .map((p) => `Pane ${p.pane}: ${p.mode} ${p.position}/${p.total}`)
+              .join(' · ')}
+            <br />
+            Frozen image. Refresh to capture a different view or changed output settings.
+          </figcaption>
+        </figure>
+      )}
       <div className="form-row">
         <label>
           Capture
@@ -47,17 +57,20 @@ export function ExportDialog({
               const scope = e.target.value as ExportOptions['scope'],
                 r =
                   scope === 'active'
-                    ? active.getBoundingClientRect()
+                    ? (active ?? workspace).getBoundingClientRect()
                     : workspace.getBoundingClientRect();
               setOptions((o) => ({
                 ...o,
                 scope,
+                pane: undefined,
                 width: Math.round(r.width),
                 height: Math.round(r.height),
               }));
             }}
           >
-            <option value="active">Active viewport</option>
+            <option value="active">
+              {options.pane === undefined ? 'Active viewport' : `Pane ${options.pane + 1}`}
+            </option>
             <option value="workspace">Whole imaging workspace</option>
           </select>
         </label>
@@ -79,7 +92,7 @@ export function ExportDialog({
           onClick={() => {
             const r =
               options.scope === 'active'
-                ? active.getBoundingClientRect()
+                ? (active ?? workspace).getBoundingClientRect()
                 : workspace.getBoundingClientRect();
             size(Math.round(r.width), Math.round(r.height));
           }}
@@ -90,7 +103,7 @@ export function ExportDialog({
           onClick={() => {
             const r =
               options.scope === 'active'
-                ? active.getBoundingClientRect()
+                ? (active ?? workspace).getBoundingClientRect()
                 : workspace.getBoundingClientRect();
             size(Math.round(r.width * 2), Math.round(r.height * 2));
           }}
@@ -172,8 +185,7 @@ export function ExportDialog({
           setBusy(true);
           setError('');
           try {
-            download(await exportImage(options, workspace), options.format);
-            onClose();
+            await createCapture(options, workspace);
           } catch (error) {
             setError(error instanceof Error ? error.message : 'Export failed. Try a smaller size.');
           } finally {
@@ -181,7 +193,19 @@ export function ExportDialog({
           }
         }}
       >
-        {busy ? 'Rendering…' : 'Download image'}
+        {busy ? 'Rendering…' : 'Refresh preview'}
+      </button>
+      <button
+        className="primary full"
+        disabled={!capture || busy}
+        onClick={() => {
+          if (capture) {
+            download(capture.blob, capture.options.format);
+            onClose();
+          }
+        }}
+      >
+        Download image
       </button>
     </Dialog>
   );

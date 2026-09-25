@@ -1,4 +1,11 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { AgentTools } from '../features/agent/AgentTools';
+import {
+  closeCapture,
+  createCapture,
+  captureDefaults,
+  useCapture,
+} from '../features/export/capture';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { paneCount, useSession } from './store';
 import { importFiles, droppedFiles, type ImportProgress } from '../features/import/importer';
 import { StudyBrowser } from '../features/study-browser/StudyBrowser';
@@ -14,8 +21,10 @@ export default function App() {
     notice = useSession((s) => s.notice),
     hasStudies = useSession((s) => s.studies.length > 0);
   const [progress, setProgress] = useState<ImportProgress>();
-  const [dialog, setDialog] = useState<'metadata' | 'export'>();
-  const [exportWorkspace, setExportWorkspace] = useState<HTMLElement>();
+  const [dialog, setDialog] = useState<'metadata'>();
+  const [exportWorkspace, setExportWorkspace] = useState<HTMLElement | null>(null);
+  const captureOpen = useCapture((s) => s.open);
+  useEffect(() => () => closeCapture(), []);
   const [drop, setDrop] = useState(false);
   const [split, setSplit] = useState(60);
   const files = useRef<HTMLInputElement>(null),
@@ -23,6 +32,10 @@ export default function App() {
     zip = useRef<HTMLInputElement>(null),
     workspace = useRef<HTMLDivElement>(null),
     abort = useRef<AbortController | undefined>(undefined);
+  const workspaceRef = useCallback((element: HTMLDivElement | null) => {
+    workspace.current = element;
+    setExportWorkspace(element);
+  }, []);
   const importing = !!progress && !progress.finished;
   const start = (files: File[]) => {
     if (importing || !files.length) return;
@@ -76,6 +89,7 @@ export default function App() {
           </button>
         </div>
         <div className="header-end">
+          <AgentTools workspace={workspace} />
           <select
             aria-label="Memory profile"
             value={profile}
@@ -135,8 +149,13 @@ export default function App() {
         }}
         onExport={() => {
           pause();
-          setExportWorkspace(workspace.current ?? undefined);
-          setDialog('export');
+          if (workspace.current)
+            void createCapture(captureDefaults(workspace.current), workspace.current).catch(
+              (error) =>
+                useSession.setState({
+                  notice: error instanceof Error ? error.message : 'Capture failed.',
+                }),
+            );
         }}
       />
       {progress && (
@@ -192,7 +211,7 @@ export default function App() {
       )}
       <main className={sidebar ? 'with-sidebar' : ''}>
         <div
-          ref={workspace}
+          ref={workspaceRef}
           className={`workspace layout-${layout}`}
           style={{ '--split': `${split}%`, '--rest': `${100 - split}%` } as CSSProperties}
         >
@@ -276,8 +295,8 @@ export default function App() {
       </footer>
       {drop && <div className="drop-overlay">Drop a DICOM folder, files, or ZIP</div>}
       {dialog === 'metadata' && <MetadataDialog onClose={() => setDialog(undefined)} />}
-      {dialog === 'export' && exportWorkspace && (
-        <ExportDialog workspace={exportWorkspace} onClose={() => setDialog(undefined)} />
+      {captureOpen && exportWorkspace && (
+        <ExportDialog workspace={exportWorkspace} onClose={closeCapture} />
       )}
     </div>
   );

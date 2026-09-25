@@ -1,10 +1,15 @@
+import { ViewerError } from '../../app/errors';
+import { abortable } from '../../app/async';
+import { renderAndWait } from '../../imaging/rendering/render';
+import { useMarks } from '../annotations/model';
 import { Enums, StackViewport, VolumeViewport, type Types } from '@cornerstonejs/core';
 import { controllers, crosshairs, pause } from '../../imaging/rendering/controller';
-import { useSession } from '../../app/store';
+import { paneCount, useSession } from '../../app/store';
 import { volumes } from '../../imaging/rendering/volumes';
 import { budgets } from '../../imaging/types';
 export interface ExportOptions {
   scope: 'active' | 'workspace';
+  pane?: number;
   format: 'png' | 'jpeg';
   width: number;
   height: number;
@@ -22,26 +27,36 @@ export function validateExport(width: number, height: number, profile: 'standard
     height > b.exportSide ||
     width * height > b.exportPixels
   )
-    throw new Error(
+    throw new ViewerError(
       `Use dimensions up to ${b.exportSide}px per side and ${b.exportPixels / 1e6} megapixels.`,
     );
 }
-export async function exportImage(options: ExportOptions, workspace: HTMLElement): Promise<Blob> {
+export async function exportImage(
+  options: ExportOptions,
+  workspace: HTMLElement,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  signal?.throwIfAborted();
   pause();
   const state = useSession.getState();
   validateExport(options.width, options.height, state.profile);
   const selected = controllers.filter(
-    (c) => c.viewport && c.element && (options.scope === 'workspace' || c.index === state.active),
+    (c) =>
+      c.index < paneCount(state.layout) &&
+      c.viewport &&
+      c.element &&
+      (options.scope === 'workspace' || c.index === (options.pane ?? state.active)),
   );
-  if (!selected.length) throw new Error('Open an image before exporting.');
+  if (!selected.length) throw new ViewerError('Open an image before exporting.');
   if (selected.some((c) => state.panes[c.index].pending))
-    throw new Error('Wait for pending frames to finish before exporting.');
+    throw new ViewerError('Wait for pending frames to finish before exporting.');
   const bounds =
     options.scope === 'workspace'
       ? workspace.getBoundingClientRect()
       : selected[0].element!.getBoundingClientRect();
   const snapshots = selected.map((c) => ({
     index: c.index,
+    marks: structuredClone(useMarks.getState().panes[c.index]),
     mode: state.panes[c.index].mode,
     setId: state.panes[c.index].setId!,
     rect: c.element!.getBoundingClientRect(),
@@ -49,13 +64,13 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
     properties: structuredClone(c.viewport!.getProperties()),
     imageIds: c.viewport instanceof StackViewport ? c.viewport.getImageIds() : undefined,
     displayed: state.panes[c.index].displayed,
-    point: crosshairs.get(state.panes[c.index].setId!),
+    point: crosshairs.get(state.panes[c.index].setId!)?.slice(),
   }));
   const canvas = document.createElement('canvas');
   canvas.width = options.width;
   canvas.height = options.height;
   const context = canvas.getContext('2d');
-  if (!context) throw new Error('Export canvas allocation failed. Try a smaller size.');
+  if (!context) throw new ViewerError('Export canvas allocation failed. Try a smaller size.');
   context.fillStyle = '#000';
   context.fillRect(0, 0, canvas.width, canvas.height);
   const scale = Math.min(options.width / bounds.width, options.height / bounds.height),
@@ -80,6 +95,7 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
   };
   try {
     for (const s of snapshots) {
+      signal?.throwIfAborted();
       const w = Math.max(1, Math.round(s.rect.width * scale)),
         h = Math.max(1, Math.round(s.rect.height * scale));
       holder.style.width = `${w / devicePixelRatio}px`;
@@ -102,31 +118,35 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
         },
       });
       const v = engine.getViewport(id) as StackViewport | VolumeViewport;
-      if (v instanceof StackViewport) await v.setStack(s.imageIds!, s.displayed);
-      else await v.setVolumes([{ volumeId: volumes.volumes.get(s.setId)!.id }]);
+      if (v instanceof StackViewport) await abortable(v.setStack(s.imageIds!, s.displayed), signal);
+      else await abortable(v.setVolumes([{ volumeId: volumes.volumes.get(s.setId)!.id }]), signal);
       v.setCamera(s.camera);
       if (s.properties) v.setProperties(s.properties);
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          holder.removeEventListener(Enums.Events.IMAGE_RENDERED, rendered);
-          reject(new Error('Export render timed out. Try a smaller image.'));
-        }, 15000);
-        const rendered = () => {
-          clearTimeout(timer);
-          holder.removeEventListener(Enums.Events.IMAGE_RENDERED, rendered);
-          resolve();
-        };
-        holder.addEventListener(Enums.Events.IMAGE_RENDERED, rendered);
-        v.render();
-      });
+      await renderAndWait(v, signal);
       const x = ox + (s.rect.left - bounds.left) * scale,
         y = oy + (s.rect.top - bounds.top) * scale;
+      signal?.throwIfAborted();
       context.drawImage(v.canvas, x, y, w, h);
+      for (const mark of s.marks) {
+        context.strokeStyle = mark.color;
+        context.lineWidth = Math.max(1, 2 * scale);
+        context.beginPath();
+        context.ellipse(
+          x + mark.x * w,
+          y + mark.y * h,
+          mark.rx * w,
+          mark.ry * h,
+          0,
+          0,
+          2 * Math.PI,
+        );
+        context.stroke();
+      }
       if (options.overlays) {
         context.fillStyle = '#dce7ed';
         context.font = `${Math.max(12, 14 * scale)}px system-ui`;
         context.fillText(
-          `${s.mode === 'stack' ? 'Slice' : 'Reconstruction'} ${s.displayed + 1}`,
+          `Pane ${s.index + 1} · ${s.mode === 'stack' ? 'Slice' : s.mode} ${s.displayed + 1}`,
           x + 12,
           y + 24 * scale,
         );
@@ -146,19 +166,25 @@ export async function exportImage(options: ExportOptions, workspace: HTMLElement
       releaseViewport();
     }
     const mime = options.format === 'png' ? 'image/png' : 'image/jpeg';
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob(
-        (b) =>
-          b ? resolve(b) : reject(new Error('Export allocation failed. Try a smaller size.')),
-        mime,
-        options.quality,
+    const blob = await abortable(
+      new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) =>
+            b
+              ? resolve(b)
+              : reject(new ViewerError('Export allocation failed. Try a smaller size.')),
+          mime,
+          options.quality,
+        ),
       ),
+      signal,
     );
-    if (blob.type !== mime) throw new Error('Browser did not produce the selected format.');
+    if (blob.type !== mime) throw new ViewerError('Browser did not produce the selected format.');
     const decoded = await createImageBitmap(blob);
     const valid = decoded.width === options.width && decoded.height === options.height;
     decoded.close();
-    if (!valid) throw new Error('Export dimensions did not match.');
+    if (!valid) throw new ViewerError('Export dimensions did not match.');
+    signal?.throwIfAborted();
     return blob;
   } finally {
     releaseViewport();

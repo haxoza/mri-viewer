@@ -1,13 +1,9 @@
+import { viewerActions } from '../../app/actions';
 import { useEffect, useState } from 'react';
 import type { Plane } from '../../imaging/types';
 import { getSet, useSession, type Layout, type Tool } from '../../app/store';
-import {
-  changeLayout,
-  controllers,
-  getSetSiblings,
-  openMpr,
-  togglePlay,
-} from '../../imaging/rendering/controller';
+import { getSetSiblings, togglePlay } from '../../imaging/rendering/controller';
+import { editMarks, useMarks, type MarkColor } from '../annotations/model';
 import { parseIndex } from '../../imaging/tools/navigation';
 export function Toolbar({
   onMetadata,
@@ -20,8 +16,8 @@ export function Toolbar({
     p = useSession((s) => s.panes[s.active]),
     tool = useSession((s) => s.tool),
     layout = useSession((s) => s.layout);
-  const c = controllers[active],
-    set = getSet(p.setId);
+  const color = useMarks((s) => s.color);
+  const set = getSet(p.setId);
   const [input, setInput] = useState('');
   const [invalid, setInvalid] = useState(false);
   const [announcement, setAnnouncement] = useState('');
@@ -42,14 +38,14 @@ export function Toolbar({
   const submit = () => {
     const index = parseIndex(input, p.total);
     setInvalid(index === undefined);
-    if (index !== undefined) void c.navigate(index);
+    if (index !== undefined) void viewerActions.setSlice(active, index);
   };
   const siblings = set ? getSetSiblings(set) : [];
   return (
     <>
       <div className="tools">
         <div className="tool-group">
-          {(['slices', 'pan', 'zoom', 'window', 'crosshair'] as Tool[]).map((t) => (
+          {(['slices', 'pan', 'zoom', 'window', 'crosshair', 'ellipse'] as Tool[]).map((t) => (
             <button
               key={t}
               disabled={t === 'crosshair' && p.mode === 'stack'}
@@ -64,16 +60,17 @@ export function Toolbar({
                   zoom: 'Zoom',
                   window: 'Window',
                   crosshair: 'Crosshair',
+                  ellipse: 'Ellipse',
                 }[t]
               }
             </button>
           ))}
         </div>
         <div className="tool-group">
-          <button disabled={!set || p.pending} onClick={() => c.reset(false)}>
+          <button disabled={!set || p.pending} onClick={() => viewerActions.reset(active, false)}>
             Fit
           </button>
-          <button disabled={!set || p.pending} onClick={() => c.reset()}>
+          <button disabled={!set || p.pending} onClick={() => viewerActions.reset(active)}>
             Reset
           </button>
         </div>
@@ -83,7 +80,7 @@ export function Toolbar({
             <select
               aria-label="Layout"
               value={layout}
-              onChange={(e) => changeLayout(e.target.value as Layout)}
+              onChange={(e) => viewerActions.setLayout(e.target.value as Layout)}
             >
               <option value="single">1 · Single</option>
               <option value="columns-2">2 · Side by side</option>
@@ -95,7 +92,7 @@ export function Toolbar({
               <option value="rows-4">4 · Rows</option>
             </select>
           </label>
-          <button disabled={!set || p.pending} onClick={() => void openMpr()}>
+          <button disabled={!set || p.pending} onClick={() => void viewerActions.openMpr()}>
             MPR
           </button>
           {set && (
@@ -103,7 +100,9 @@ export function Toolbar({
               aria-label="Viewport mode"
               value={p.mode}
               disabled={p.pending}
-              onChange={(e) => void c.assign(p.setId!, e.target.value as 'stack' | Plane)}
+              onChange={(e) =>
+                void viewerActions.assignView(active, p.setId!, e.target.value as 'stack' | Plane)
+              }
             >
               <option value="stack">Acquired stack</option>
               <option value="axial">Axial MPR</option>
@@ -111,6 +110,22 @@ export function Toolbar({
               <option value="coronal">Coronal MPR</option>
             </select>
           )}
+        </div>
+        <div
+          className="tool-group"
+          title="Screen marks stay fixed through navigation; no anatomical tracking or measurements."
+        >
+          <select
+            aria-label="Mark color"
+            value={color}
+            onChange={(e) => useMarks.setState({ color: e.target.value as MarkColor })}
+          >
+            <option value="red">Red</option>
+            <option value="yellow">Yellow</option>
+            <option value="cyan">Cyan</option>
+          </select>
+          <button onClick={() => editMarks(active, { action: 'undo' })}>Undo mark</button>
+          <button onClick={() => editMarks(active, { action: 'clear' })}>Clear marks</button>
         </div>
         <div className="tool-group trailing">
           <button disabled={!set || p.displayed < 0} onClick={onMetadata}>
@@ -129,14 +144,14 @@ export function Toolbar({
         <button
           aria-label="First slice"
           disabled={!p.total || p.requested === 0}
-          onClick={() => void c.navigate(0)}
+          onClick={() => void viewerActions.setSlice(active, 0)}
         >
           Ⅰ‹
         </button>
         <button
           aria-label="Previous slice"
           disabled={!p.total || p.requested === 0}
-          onClick={() => void c.navigate(p.requested - 1)}
+          onClick={() => void viewerActions.setSlice(active, p.requested - 1)}
         >
           ‹
         </button>
@@ -148,7 +163,7 @@ export function Toolbar({
           max={Math.max(0, p.total - 1)}
           value={p.requested}
           disabled={p.total < 2}
-          onChange={(e) => void c.navigate(Number(e.target.value))}
+          onChange={(e) => void viewerActions.setSlice(active, Number(e.target.value))}
         />
         <div className="index-input">
           <input
@@ -175,14 +190,14 @@ export function Toolbar({
         <button
           aria-label="Next slice"
           disabled={!p.total || p.requested >= p.total - 1}
-          onClick={() => void c.navigate(p.requested + 1)}
+          onClick={() => void viewerActions.setSlice(active, p.requested + 1)}
         >
           ›
         </button>
         <button
           aria-label="Last slice"
           disabled={!p.total || p.requested >= p.total - 1}
-          onClick={() => void c.navigate(p.total - 1)}
+          onClick={() => void viewerActions.setSlice(active, p.total - 1)}
         >
           ›Ⅰ
         </button>
@@ -254,7 +269,10 @@ export function Toolbar({
         {siblings.length > 1 && (
           <label className="inline-label">
             Time
-            <select value={p.setId} onChange={(e) => void c.assign(e.target.value)}>
+            <select
+              value={p.setId}
+              onChange={(e) => void viewerActions.assignView(active, e.target.value)}
+            >
               {siblings.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.frames[0].temporal || 'Unknown'}

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Frame, Plane, Profile, Study } from '../imaging/types';
 import { allSets, buildCatalog } from '../imaging/catalog';
-export type Tool = 'slices' | 'pan' | 'zoom' | 'window' | 'crosshair';
+export type Tool = 'slices' | 'pan' | 'zoom' | 'window' | 'crosshair' | 'ellipse';
 export type Layout =
   | 'single'
   | 'columns-2'

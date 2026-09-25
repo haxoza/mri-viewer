@@ -87,6 +87,8 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel('Lock aspect ratio').uncheck();
   await page.getByLabel('Export height').fill('600');
   const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
   await page.getByRole('button', { name: 'Download image' }).click();
   const d = await download;
   expect(d.suggestedFilename()).toBe('mri-view.png');
@@ -110,6 +112,8 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel(/^Format/).selectOption('jpeg');
   await page.getByRole('button', { name: '2×', exact: true }).click();
   const workspaceDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
   await page.getByRole('button', { name: 'Download image' }).click();
   const jpeg = await workspaceDownload;
   expect(jpeg.suggestedFilename()).toBe('mri-view.jpg');
@@ -211,6 +215,8 @@ test('MPR export preserves every pane when rendered again', async ({ page }) => 
     await page.getByLabel(/^Capture/).selectOption(scope);
     await page.getByRole('button', { name: '2×', exact: true }).click();
     const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Refresh preview' }).click();
+    await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
     await page.getByRole('button', { name: 'Download image' }).click();
     await download;
     expect(await pixels()).toEqual(before);
@@ -318,6 +324,8 @@ test('stack exports contain slice pixels in PNG and JPEG', async ({ page }) => {
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await page.getByLabel(/^Format/).selectOption(format);
     const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Refresh preview' }).click();
+    await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
     await page.getByRole('button', { name: 'Download image' }).click();
     await expectImagePixels(page, await readFile((await (await download).path())!));
   }

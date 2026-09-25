@@ -1,3 +1,4 @@
+import { viewerActions } from '../../app/actions';
 import { useEffect, useRef, useState } from 'react';
 import { VolumeViewport, Enums } from '@cornerstonejs/core';
 import { useSession, getSet } from '../../app/store';
@@ -9,7 +10,8 @@ import {
 } from '../../imaging/rendering/controller';
 import { WheelSteps } from '../../imaging/tools/navigation';
 import { direction } from '../../imaging/geometry';
-import type { Vec3 } from '../../imaging/types';
+import { panView, zoomView, windowView } from '../../app/viewActions';
+import { AnnotationOverlay } from '../annotations/AnnotationOverlay';
 export function Viewport({ index }: { index: number }) {
   const element = useRef<HTMLDivElement>(null);
   const p = useSession((s) => s.panes[index]);
@@ -30,7 +32,7 @@ export function Viewport({ index }: { index: number }) {
     const points = new Map<number, { x: number; y: number }>();
     let dy = 0;
     let multi = false;
-    const activate = () => useSession.setState({ active: index });
+    const activate = () => viewerActions.setActivePane(index);
     const updateCross = () => {
       const pane = useSession.getState().panes[index],
         point = crosshairs.get(pane.setId!);
@@ -51,25 +53,8 @@ export function Viewport({ index }: { index: number }) {
       );
       if (steps) void c.navigate(useSession.getState().panes[index].requested + steps);
     };
-    const pan = (dx: number, dy: number) => {
-      const v = c.viewport;
-      if (!v) return;
-      const a = v.canvasToWorld([0, 0]),
-        b = v.canvasToWorld([dx, dy]),
-        camera = v.getCamera();
-      const delta = a.map((x, i) => x - b[i]);
-      v.setCamera({
-        position: camera.position!.map((x, i) => x + delta[i]) as Vec3,
-        focalPoint: camera.focalPoint!.map((x, i) => x + delta[i]) as Vec3,
-      });
-      v.render();
-    };
-    const zoom = (factor: number) => {
-      const v = c.viewport;
-      if (!v) return;
-      v.setZoom(Math.max(0.05, Math.min(30, v.getZoom() * factor)));
-      v.render();
-    };
+    const pan = (dx: number, dy: number) => panView(index, dx, dy);
+    const zoom = (factor: number) => zoomView(index, (c.viewport?.getZoom() ?? 1) * factor);
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       activate();
@@ -122,8 +107,7 @@ export function Viewport({ index }: { index: number }) {
         if (range) {
           const width = Math.max(1, range.upper - range.lower + dx * 3),
             center = (range.upper + range.lower) / 2 + deltaY * 3;
-          v.setProperties({ voiRange: { lower: center - width / 2, upper: center + width / 2 } });
-          v.render();
+          windowView(index, width, center);
         }
       } else {
         const r = el.getBoundingClientRect();
@@ -164,7 +148,7 @@ export function Viewport({ index }: { index: number }) {
     <section
       className={`viewport ${active ? 'active' : ''}`}
       aria-label={`Pane ${index + 1}`}
-      onPointerDown={() => useSession.setState({ active: index })}
+      onPointerDown={() => viewerActions.setActivePane(index)}
     >
       <div
         ref={element}
@@ -208,9 +192,7 @@ export function Viewport({ index }: { index: number }) {
             className={p.linked ? 'selected' : ''}
             aria-label={`Link pane ${index + 1}`}
             aria-pressed={p.linked}
-            onClick={() =>
-              useSession.getState().patch(index, { linked: !p.linked, linkStatus: undefined })
-            }
+            onClick={() => viewerActions.setLinked(index, !p.linked)}
           >
             Link
           </button>
@@ -255,6 +237,7 @@ export function Viewport({ index }: { index: number }) {
           </div>
         </>
       )}
+      <AnnotationOverlay index={index} />
       {cross && p.mode !== 'stack' && (
         <svg className="crosshair" aria-hidden="true">
           <path d={`M ${cross[0]} 0 V 10000 M 0 ${cross[1]} H 10000`} />

@@ -3,9 +3,10 @@
 Start `npm run dev`, open its localhost URL in Codex desktop, load local files,
 and enable **Agent tools → Enable for this session**. Enabling allows all listed
 viewer operations and captures until disabled or the page is closed/reloaded.
-If the browser lacks `document.modelContext.registerTool` / `unregisterTool`,
-the control explains that tools are unavailable; manual viewing, marks and exports
-remain usable.
+If the browser lacks `document.modelContext.registerTool`, the control explains
+that tools are unavailable; manual viewing, marks and exports remain usable.
+Registrations use an `AbortSignal` so disabling the control removes tools even
+when the browser does not expose an `unregisterTool` method.
 
 **DICOM files stay in this browser. Images shared with your desktop agent enter that agent's conversation.**
 Captured pixels may contain burned-in identifiers. Agent processing and retention
@@ -64,17 +65,18 @@ annotation services are usable independently of WebMCP.
 
 ## Verification status and deferred desktop check
 
-Local validation passed: `npm run check` (16 unit tests, lint, type check, build
-and privacy guard), plus all 17 browser tests against both production and
-development servers. High-DPI capture and annotation pixels are included.
+Validation covers lint, type checking, build, privacy guard, 18 unit tests and
+19 browser tests. High-DPI capture, annotation pixels, delayed API injection,
+signal-based tool removal and slow preview encoding are included.
 
 Automated tests use generated synthetic DICOM, an imperative WebMCP test double,
 and real Chromium rendering. This verifies application behavior, not native Codex
 site-tool discovery or image inspection.
 
-**Codex desktop/model combination verified: none yet.** On 2026-09-25 the in-app
-browser was unavailable to this development session. The live check is deferred
-at the user's request until they return to the keyboard in this same session.
+**Codex desktop basic WebMCP check passed on 2026-09-26.** In the built-in
+browser at `localhost:5173`, enabling the control exposed 12 tools,
+`get_viewer_state` returned an empty-session state, and disabling removed all
+tools. The full capture workflow with loaded DICOM remains to be checked.
 
 When available:
 
@@ -94,3 +96,17 @@ Run `npm run check`, `npm run test:e2e` and
 
 API references: [OpenAI site tools](https://learn.chatgpt.com/docs/webmcp) and
 [WebMCP specification](https://webmachinelearning.github.io/webmcp/).
+
+## CI export regression
+
+The [September 25 CI run](https://github.com/haxoza/mri-viewer/actions/runs/36193054655)
+failed two MPR export tests while the Download button was still disabled after
+preview refresh. Both used Playwright's default five-second assertion timeout,
+although captures have a 60-second application budget. The WebMCP capability
+changes did not address these export waits.
+
+A six-second encoding delay reproduces the original assertion failure. Export
+tests now wait for refresh completion within that budget, check for an error and
+require a new preview URL before downloading. Download event listeners start
+only after refresh succeeds, avoiding secondary errors when refresh fails.
+The two workflows with multiple MPR captures also have a longer overall test budget.

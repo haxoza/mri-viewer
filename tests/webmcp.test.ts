@@ -68,3 +68,65 @@ test('partial registration failure rolls back registered tools', async () => {
   expect(tools.size).toBe(0);
   stop();
 });
+
+test('capability diagnostics distinguish missing, blocked and framed APIs', async () => {
+  const { probeWebMcp } = await import('../src/features/agent/capabilities');
+  const window = { isSecureContext: true };
+  Object.assign(window, { top: window });
+  vi.stubGlobal('window', window);
+  vi.stubGlobal('navigator', {});
+  vi.stubGlobal('document', {});
+  expect(probeWebMcp()).toMatchObject({
+    available: false,
+    reason: expect.stringContaining('has not exposed'),
+  });
+  const api = { registerTool() {} };
+  vi.stubGlobal('document', { modelContext: api });
+  expect(probeWebMcp()).toMatchObject({ available: true, api });
+  Object.assign(window, { top: {} });
+  expect(probeWebMcp()).toMatchObject({
+    available: false,
+    reason: expect.stringContaining('inside a frame'),
+  });
+  Object.assign(window, { top: window });
+  vi.stubGlobal('document', {
+    get modelContext() {
+      throw new Error('blocked');
+    },
+  });
+  expect(probeWebMcp()).toMatchObject({
+    available: false,
+    reason: expect.stringContaining('blocked access'),
+  });
+  vi.stubGlobal('document', {});
+  vi.stubGlobal('navigator', { modelContext: api });
+  expect(probeWebMcp()).toMatchObject({
+    available: false,
+    reason: expect.stringContaining('navigator.modelContext API is present'),
+  });
+  expect(probeWebMcp().diagnostics).not.toMatch(/https?:|patient|study|series/);
+});
+
+test('registration signal removes tools without unregisterTool', async () => {
+  const tools = new Map<string, SiteTool>();
+  const api = {
+    registerTool: vi.fn(async (tool: SiteTool, options?: { signal?: AbortSignal }) => {
+      if (options?.signal?.aborted) throw options.signal.reason;
+      tools.set(tool.name, tool);
+      options?.signal?.addEventListener('abort', () => tools.delete(tool.name), { once: true });
+    }),
+  };
+  const window = {};
+  Object.assign(window, { top: window });
+  vi.stubGlobal('window', window);
+  vi.stubGlobal('document', { modelContext: api });
+  const status = vi.fn();
+  const stop = registerAgentTools({} as HTMLElement, status);
+  await vi.waitFor(() => expect(tools.size).toBe(2));
+  expect(api.registerTool).toHaveBeenCalledWith(
+    expect.objectContaining({ name: 'get_viewer_state' }),
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  stop();
+  await vi.waitFor(() => expect(tools.size).toBe(0));
+});

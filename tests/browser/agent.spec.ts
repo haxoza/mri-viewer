@@ -334,3 +334,27 @@ test.describe('high-DPI capture', () => {
     expect(external).toEqual([]);
   });
 });
+
+test('agent control detects late browser injection without loading files or refreshing', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByText('Agent tools', { exact: true }).click();
+  await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
+  await expect(
+    page.getByText('The browser has not exposed document.modelContext to this page.'),
+  ).toBeVisible();
+  await page.getByText('Connection diagnostics', { exact: true }).click();
+  await expect(page.getByLabel('WebMCP diagnostics')).toContainText(
+    'document.modelContext: missing',
+  );
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'modelContext', {
+      configurable: true,
+      value: { registerTool() {}, unregisterTool() {} },
+    });
+  });
+  await expect(page.getByLabel('Enable agent tools')).toBeEnabled();
+  await page.getByLabel('Enable agent tools').check();
+  await expect(page.getByText('Enabled for this session')).toBeVisible();
+});

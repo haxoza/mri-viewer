@@ -1,3 +1,4 @@
+import { probeWebMcp } from './capabilities';
 import { ViewerError, memoryError } from '../../app/errors';
 import { executeCommand, schemas, type CommandName } from './commands';
 export interface SiteTool {
@@ -8,16 +9,12 @@ export interface SiteTool {
   execute: (args: never, options?: { signal?: AbortSignal }) => Promise<unknown>;
 }
 export interface ModelContext {
-  registerTool: (tool: SiteTool) => void | Promise<void>;
-  unregisterTool: (name: string) => void | Promise<void>;
+  registerTool: (tool: SiteTool, options?: { signal?: AbortSignal }) => void | Promise<void>;
+  // Older implementations may expose this; current WebMCP removes tools via signal.
+  unregisterTool?: (name: string) => void | Promise<void>;
 }
 export function modelContext(): ModelContext | undefined {
-  const api = (document as Document & { modelContext?: ModelContext }).modelContext;
-  return window.top === window &&
-    typeof api?.registerTool === 'function' &&
-    typeof api.unregisterTool === 'function'
-    ? api
-    : undefined;
+  return probeWebMcp().api;
 }
 const descriptions: Record<CommandName, string> = {
   get_viewer_state:
@@ -55,42 +52,48 @@ export function registerAgentTools(
   }
   const registered: string[] = [];
   const remove = async () => {
-    for (const name of registered.splice(0)) await api.unregisterTool(name);
+    lifetime.abort();
+    if (api.unregisterTool) {
+      for (const name of registered.splice(0)) await api.unregisterTool(name);
+    } else registered.length = 0;
   };
   const install = async () => {
     try {
       for (const name of Object.keys(schemas) as CommandName[]) {
         if (lifetime.signal.aborted) break;
-        await api.registerTool({
-          name,
-          description: descriptions[name],
-          inputSchema: schemas[name],
-          annotations: { readOnlyHint: name === 'get_viewer_state' },
-          execute: async (args, options) => {
-            const signal = AbortSignal.any([
-              lifetime.signal,
-              ...(options?.signal ? [options.signal] : []),
-            ]);
-            try {
-              signal.throwIfAborted();
-              return { ok: true, result: await executeCommand(name, args, workspace, signal) };
-            } catch (error) {
-              // Never return arbitrary renderer errors that may contain source IDs.
-              const reason = signal.aborted
-                ? 'Cancelled or superseded; read current state before continuing.'
-                : error instanceof DOMException && error.name === 'TimeoutError'
-                  ? 'Operation timed out. Read current state before retrying.'
-                  : error instanceof DOMException && error.name === 'AbortError'
-                    ? 'Operation cancelled. Read current state before retrying.'
-                    : error instanceof ViewerError
-                      ? error.message
-                      : error instanceof Error && error.message === memoryError
-                        ? memoryError
-                        : 'Viewer operation failed. Check pane readiness, geometry and memory.';
-              return { ok: false, error: reason };
-            }
+        await api.registerTool(
+          {
+            name,
+            description: descriptions[name],
+            inputSchema: schemas[name],
+            annotations: { readOnlyHint: name === 'get_viewer_state' },
+            execute: async (args, options) => {
+              const signal = AbortSignal.any([
+                lifetime.signal,
+                ...(options?.signal ? [options.signal] : []),
+              ]);
+              try {
+                signal.throwIfAborted();
+                return { ok: true, result: await executeCommand(name, args, workspace, signal) };
+              } catch (error) {
+                // Never return arbitrary renderer errors that may contain source IDs.
+                const reason = signal.aborted
+                  ? 'Cancelled or superseded; read current state before continuing.'
+                  : error instanceof DOMException && error.name === 'TimeoutError'
+                    ? 'Operation timed out. Read current state before retrying.'
+                    : error instanceof DOMException && error.name === 'AbortError'
+                      ? 'Operation cancelled. Read current state before retrying.'
+                      : error instanceof ViewerError
+                        ? error.message
+                        : error instanceof Error && error.message === memoryError
+                          ? memoryError
+                          : 'Viewer operation failed. Check pane readiness, geometry and memory.';
+                return { ok: false, error: reason };
+              }
+            },
           },
-        });
+          { signal: lifetime.signal },
+        );
         registered.push(name);
       }
       if (lifetime.signal.aborted) await remove();

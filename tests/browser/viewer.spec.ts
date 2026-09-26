@@ -15,7 +15,24 @@ const files = Array.from({ length: 7 }, (_, i) => ({
   mimeType: 'application/dicom',
   buffer: Buffer.from(dicom(6 - i)),
 }));
+async function refreshPreview(page: Page) {
+  const preview = page.locator('.capture-preview img');
+  const previous = await preview.getAttribute('src');
+  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  // Capture has a 60-second budget; software rendering on CI can exceed the
+  // default five-second assertion timeout. Wait for completion or an error,
+  // then verify a new capture so a failed refresh cannot download stale pixels.
+  await expect(page.getByRole('button', { name: 'Refresh preview' })).toBeEnabled({
+    timeout: 65000,
+  });
+  await expect(page.getByRole('dialog', { name: 'Export image' }).getByRole('alert')).toHaveCount(
+    0,
+  );
+  await expect(preview).not.toHaveAttribute('src', previous!);
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
+}
 test('local import, navigation, comparison, MPR, and exact-size export', async ({ page }) => {
+  test.slow();
   const external: string[] = [];
   page.on('request', (r) => {
     if (
@@ -86,9 +103,8 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel('Export width').fill('800');
   await page.getByLabel('Lock aspect ratio').uncheck();
   await page.getByLabel('Export height').fill('600');
+  await refreshPreview(page);
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Refresh preview' }).click();
-  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
   await page.getByRole('button', { name: 'Download image' }).click();
   const d = await download;
   expect(d.suggestedFilename()).toBe('mri-view.png');
@@ -111,9 +127,8 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel(/^Capture/).selectOption('workspace');
   await page.getByLabel(/^Format/).selectOption('jpeg');
   await page.getByRole('button', { name: '2×', exact: true }).click();
+  await refreshPreview(page);
   const workspaceDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Refresh preview' }).click();
-  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
   await page.getByRole('button', { name: 'Download image' }).click();
   const jpeg = await workspaceDownload;
   expect(jpeg.suggestedFilename()).toBe('mri-view.jpg');
@@ -164,6 +179,7 @@ async function expectImagePixels(
 }
 
 test('MPR export preserves every pane when rendered again', async ({ page }) => {
+  test.slow();
   await page.goto('/');
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
@@ -214,9 +230,8 @@ test('MPR export preserves every pane when rendered again', async ({ page }) => 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await page.getByLabel(/^Capture/).selectOption(scope);
     await page.getByRole('button', { name: '2×', exact: true }).click();
+    await refreshPreview(page);
     const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Refresh preview' }).click();
-    await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
     await page.getByRole('button', { name: 'Download image' }).click();
     await download;
     expect(await pixels()).toEqual(before);
@@ -323,9 +338,8 @@ test('stack exports contain slice pixels in PNG and JPEG', async ({ page }) => {
   for (const format of ['png', 'jpeg']) {
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await page.getByLabel(/^Format/).selectOption(format);
+    await refreshPreview(page);
     const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Refresh preview' }).click();
-    await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
     await page.getByRole('button', { name: 'Download image' }).click();
     await expectImagePixels(page, await readFile((await (await download).path())!));
   }
@@ -489,4 +503,24 @@ test('touch slice dragging cancels on pinch, and manual navigation pauses cine',
   await page.getByRole('button', { name: 'First slice', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Play cine' })).toBeVisible();
   await expect(page.locator('.pane-bottom')).toContainText('Slice 1 / 7');
+});
+
+test('preview refresh waits for encoding beyond the default assertion timeout', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByLabel('Open DICOM files').setInputFiles(files);
+  await expect(page.getByLabel('Slice number')).toHaveValue('4');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.locator('.capture-preview img')).toBeVisible();
+  const previous = await page.locator('.capture-preview img').getAttribute('src');
+  await page.evaluate(() => {
+    const original = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+      HTMLCanvasElement.prototype.toBlob = original;
+      original.call(this, (blob) => setTimeout(() => callback(blob), 6000), ...args);
+    };
+  });
+  await refreshPreview(page);
+  await expect(page.locator('.capture-preview img')).not.toHaveAttribute('src', previous!);
 });

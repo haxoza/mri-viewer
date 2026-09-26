@@ -1,20 +1,47 @@
 import { useEffect, useState, type RefObject } from 'react';
-import { modelContext, registerAgentTools } from './webmcp';
+import { registerAgentTools } from './webmcp';
+import { probeWebMcp } from './capabilities';
 export function AgentTools({ workspace }: { workspace: RefObject<HTMLDivElement | null> }) {
   const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState('Disabled');
-  const available = !!modelContext();
+  const [capabilities, setCapabilities] = useState(probeWebMcp);
+  const [expanded, setExpanded] = useState(false);
+  const { available } = capabilities;
+  const recheck = () =>
+    setCapabilities((previous) => {
+      const next = probeWebMcp();
+      return next.diagnostics === previous.diagnostics && next.api === previous.api
+        ? previous
+        : next;
+    });
   useEffect(() => {
-    if (!enabled || !workspace.current) return;
+    if (!expanded) return;
+    // Browser bridges may be injected after React's initial render.
+    const timer = window.setInterval(recheck, 1000);
+    window.addEventListener('focus', recheck);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', recheck);
+    };
+  }, [expanded]);
+  useEffect(() => {
+    if (!enabled || !available || !workspace.current) return;
     return registerAgentTools(workspace.current, setStatus);
-  }, [enabled, workspace]);
+  }, [enabled, available, capabilities.api, workspace]);
   return (
-    <details className="agent-tools">
+    <details
+      className="agent-tools"
+      onToggle={(e) => {
+        setExpanded(e.currentTarget.open);
+        recheck();
+      }}
+    >
       <summary>Agent tools</summary>
       <div className="popover">
         <p role="status">
           {!available ? 'Unavailable in this browser' : enabled ? status : 'Disabled'}
         </p>
+        {!available && <p>{capabilities.reason}</p>}
         <label className="check">
           <input
             type="checkbox"
@@ -28,6 +55,21 @@ export function AgentTools({ workspace }: { workspace: RefObject<HTMLDivElement 
           />
           Enable for this session
         </label>
+        <details>
+          <summary>Connection diagnostics</summary>
+          <p>
+            Capability checks only; no examination data. Copy this text when reporting a connection
+            problem.
+          </p>
+          <textarea
+            aria-label="WebMCP diagnostics"
+            readOnly
+            rows={9}
+            value={capabilities.diagnostics}
+            style={{ width: '100%', fontSize: 12 }}
+          />
+          <button onClick={recheck}>Recheck connection</button>
+        </details>
         <p>
           DICOM files stay in this browser. Images shared with your desktop agent enter that agent's
           conversation.

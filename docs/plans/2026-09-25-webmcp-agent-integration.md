@@ -1,5 +1,27 @@
 # Local MRI viewer integration with Codex through WebMCP
 
+## 2026-09-28 amendment: live screenshot preparation
+
+This amendment supersedes the agent capture portions of the original plan below.
+Manual Export continues to create frozen PNG/JPEG previews and exact downloads.
+`capture_view` now prepares the live viewer for the agent's browser screenshot:
+hide app chrome, expand the requested pane/workspace, preserve pane renderers,
+and retain safe View labels, positions and marks. It returns settled context,
+not an encoded image. A compact live/readiness indicator and Restore controls
+button remain visible; Escape, `close_capture`, disable and cancellation restore
+the normal interface. A **Screenshot view** control beside Export provides the same
+active-pane/workspace preparation without enabling WebMCP. Navigation updates the live view and marks it changed
+since preparation. Open dialogs must be closed first. Frozen Export gains
+explicit viewer/settings change notices without changing download semantics.
+
+Reason: the user's desktop workflow screenshots the Export dialog. Baseline
+synthetic testing confirmed wasted screen space and weak frozen-change feedback.
+Current WebMCP results are JSON-serialized; official OpenAI docs do not specify
+an image result contract. See [research, workflow and verification](../webmcp.md).
+No image-return protocol is assumed and no transport/backend is introduced.
+
+## Original implementation plan (historical)
+
 ## Summary
 
 Expose the MRI viewer's capabilities through **WebMCP**, enabling human–agent collaboration on the same live page.

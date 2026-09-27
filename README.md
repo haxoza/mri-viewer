@@ -34,7 +34,8 @@ npm run preview
 - **Metadata** inspects a chosen source instance/frame, including nested sequences and private tags. The series summary identifies common versus varying fields.
 - **Ellipse** draws red/yellow/cyan screen marks, with undo and clear. Marks stay fixed during navigation; they do not track anatomy.
 - **Export** opens a frozen preview of a pane or workspace. Refresh after changing output settings; PNG/JPEG downloads use the displayed capture. Identifiers burned into source pixels remain in exports.
-- **Agent tools** optionally exposes the live viewer through WebMCP. See [agent tools, privacy boundary and desktop verification](docs/webmcp.md).
+- **Screenshot view** beside Export hides controls for the active pane or whole workspace. It works without agent tools; use **Restore controls** or Escape to exit.
+- **Agent tools** optionally exposes the live viewer through WebMCP. Agent captures maximize a live pane/workspace for a browser screenshot; **Restore controls** or Escape returns to normal viewing. See [agent tools, privacy boundary and desktop verification](docs/webmcp.md).
 
 ## Limits and verification
 

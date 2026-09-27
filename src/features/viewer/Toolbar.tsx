@@ -1,22 +1,28 @@
 import { viewerActions } from '../../app/actions';
+import { ActionMenu } from '../../app/ActionMenu';
 import { useEffect, useState } from 'react';
 import type { Plane } from '../../imaging/types';
-import { getSet, useSession, type Layout, type Tool } from '../../app/store';
+import { getSet, paneCount, useSession, type Layout, type Tool } from '../../app/store';
 import { getSetSiblings, togglePlay } from '../../imaging/rendering/controller';
 import { editMarks, useMarks, type MarkColor } from '../annotations/model';
 import { parseIndex } from '../../imaging/tools/navigation';
 export function Toolbar({
   onMetadata,
   onExport,
+  onScreenshot,
 }: {
   onMetadata: () => void;
   onExport: () => void;
+  onScreenshot: (scope: 'active' | 'workspace') => void;
 }) {
   const active = useSession((s) => s.active),
     p = useSession((s) => s.panes[s.active]),
     tool = useSession((s) => s.tool),
     layout = useSession((s) => s.layout);
   const color = useMarks((s) => s.color);
+  const hasWorkspaceImage = useSession((s) =>
+    s.panes.slice(0, paneCount(s.layout)).some((pane) => pane.setId && pane.displayed >= 0),
+  );
   const set = getSet(p.setId);
   const [input, setInput] = useState('');
   const [invalid, setInvalid] = useState(false);
@@ -128,6 +134,32 @@ export function Toolbar({
           <button onClick={() => editMarks(active, { action: 'clear' })}>Clear marks</button>
         </div>
         <div className="tool-group trailing">
+          <ActionMenu label="Screenshot view">
+            {(close) => (
+              <>
+                <button
+                  role="menuitem"
+                  disabled={!set || p.pending || p.displayed < 0}
+                  onClick={() => {
+                    close();
+                    onScreenshot('active');
+                  }}
+                >
+                  Active pane
+                </button>
+                <button
+                  role="menuitem"
+                  disabled={!hasWorkspaceImage}
+                  onClick={() => {
+                    close();
+                    onScreenshot('workspace');
+                  }}
+                >
+                  Whole workspace
+                </button>
+              </>
+            )}
+          </ActionMenu>
           <button disabled={!set || p.displayed < 0} onClick={onMetadata}>
             Metadata
           </button>

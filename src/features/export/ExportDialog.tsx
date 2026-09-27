@@ -1,9 +1,10 @@
+import { useMarks } from '../annotations/model';
 import { useState } from 'react';
 import { Dialog } from '../../app/Dialog';
 import { useSession } from '../../app/store';
 import { controllers } from '../../imaging/rendering/controller';
 import { download, type ExportOptions } from './service';
-import { captureDefaults, createCapture, useCapture } from './capture';
+import { captureDefaults, createCapture, useCapture, viewSignature } from './capture';
 export function ExportDialog({
   workspace,
   onClose,
@@ -12,6 +13,8 @@ export function ExportDialog({
   onClose: () => void;
 }) {
   const capture = useCapture((s) => s.capture);
+  useSession();
+  useMarks();
   const [options, setOptions] = useState<ExportOptions>(
     () => capture?.options ?? captureDefaults(workspace),
   );
@@ -47,6 +50,16 @@ export function ExportDialog({
             Frozen image. Refresh to capture a different view or changed output settings.
           </figcaption>
         </figure>
+      )}
+      {capture && capture.signature !== viewSignature() && (
+        <p role="status" className="capture-change">
+          Viewer changed – this preview is unchanged.
+        </p>
+      )}
+      {capture && JSON.stringify(options) !== JSON.stringify(capture.options) && (
+        <p role="status" className="capture-change">
+          Output settings changed – refresh to apply. Download still uses this preview.
+        </p>
       )}
       <div className="form-row">
         <label>

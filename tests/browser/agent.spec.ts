@@ -57,7 +57,7 @@ async function setup(page: Page) {
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
   await page.getByText('Agent tools', { exact: true }).click();
-  await page.getByLabel('Enable agent tools').check();
+  await page.getByLabel('Enable agent tools').click();
   await expect(page.getByText('Enabled for this session')).toBeVisible();
   await page.getByText('Agent tools', { exact: true }).click();
 }
@@ -90,6 +90,25 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   ).toBe(true);
   const capture = await call(page, 'capture_view', {});
   expect(capture.ok, capture.error).toBe(true);
+  expect(capture.result.live).toBe(true);
+  expect(capture.result.panes[0]).toMatchObject({
+    pane: 1,
+    displayed: 2,
+    label: 'View 1',
+    annotations: [mark],
+  });
+  await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeHidden();
+  await expect(page.locator('.capture-preview')).toHaveCount(0);
+  await expect(page.locator('.pane-top')).toContainText('View 1');
+  await expect(page.locator('.pane-top')).not.toContainText('Synthetic');
+  expect(JSON.stringify(capture)).not.toMatch(
+    /Synthetic|Patient|studyUID|seriesUID|sopUID|synthetic-/,
+  );
+  expect((await call(page, 'get_viewer_state')).result.screenshot.changed).toBe(false);
+  await call(page, 'close_capture');
+  // Frozen downloads remain a separate, unchanged contract.
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.locator('.capture-preview img')).toBeVisible();
   const url = await page.locator('.capture-preview img').getAttribute('src');
   const frozenBytes = await page.evaluate(
@@ -101,7 +120,10 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   await expect(page.locator('.capture-preview img')).toHaveAttribute('src', url!);
   await expect(page.locator('.capture-preview figcaption')).toContainText('acquired 2/7');
   expect((await call(page, 'get_viewer_state')).result.panes[0].annotations).toEqual([mark]);
+  await expect(page.getByText('Viewer changed – this preview is unchanged.')).toBeVisible();
+  expect((await call(page, 'capture_view')).ok).toBe(false);
   await page.getByLabel('Export width').fill('500');
+  await expect(page.getByText('Output settings changed', { exact: false })).toBeVisible();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download image' }).click();
   expect(Array.from(await readFile((await (await download).path())!))).toEqual(frozenBytes);
@@ -110,9 +132,9 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   expect((await call(page, 'edit_annotations', { pane: 1, action: 'undo' })).ok).toBe(true);
   expect((await call(page, 'get_viewer_state')).result.panes[0].annotations).toEqual([mark]);
   await page.getByText('Agent tools', { exact: true }).click();
-  await page.getByLabel('Enable agent tools').uncheck();
+  await page.getByLabel('Disable agent tools').click();
   await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(0);
-  await page.getByLabel('Enable agent tools').check();
+  await page.getByLabel('Enable agent tools').click();
   await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(12);
 });
 
@@ -154,8 +176,18 @@ test('serialized commands settle linked panes and MPR; workspace excludes hidden
 test('unsupported browser retains annotation, preview, and export workflow', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Agent tools', { exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('agent-menu.png') });
   await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
   await page.getByText('Agent tools', { exact: true }).click();
+  const screenshotButton = page.getByRole('button', { name: 'Screenshot view', exact: true });
+  await screenshotButton.click();
+  await expect(page.getByRole('menu', { name: 'Screenshot view' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(screenshotButton).toBeFocused();
+  await expect(screenshotButton).toHaveAttribute('aria-expanded', 'false');
+  await screenshotButton.click();
+  await page.locator('.brand').click();
+  await expect(screenshotButton).toHaveAttribute('aria-expanded', 'false');
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
   await page.getByRole('button', { name: 'Ellipse', exact: true }).click();
@@ -168,6 +200,27 @@ test('unsupported browser retains annotation, preview, and export workflow', asy
   await page.getByRole('button', { name: 'Slices', exact: true }).click();
   await page.getByRole('button', { name: 'Next slice', exact: true }).click();
   await expect(page.locator('.annotations ellipse')).toHaveCount(1);
+  // Manual screenshot preparation also works without a WebMCP bridge or opt-in.
+  await page.getByLabel('Layout', { exact: true }).selectOption('columns-2');
+  for (const scope of ['Active pane', 'Whole workspace']) {
+    await page.getByText('Screenshot view', { exact: true }).click();
+    await page.screenshot({ path: test.info().outputPath('screenshot-menu.png') });
+    await page.getByRole('menuitem', { name: scope, exact: true }).click();
+    await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
+    await expect(page.locator('.app-header')).toBeHidden();
+    await expect(page.locator('.annotations ellipse').first()).toBeVisible();
+    if (scope === 'Active pane') {
+      await expect(page.locator('.viewport').nth(1)).toBeHidden();
+      await page.keyboard.press('Escape');
+    } else {
+      await expect(page.locator('.viewport').nth(1)).toBeVisible();
+      await page.getByRole('button', { name: 'Restore controls' }).click();
+    }
+    await expect(page.getByText('Screenshot view', { exact: true })).toBeFocused();
+    await expect(page.locator('.app-header')).toBeVisible();
+    await expect(page.getByLabel('Layout', { exact: true })).toHaveValue('columns-2');
+  }
+  await page.getByLabel('Layout', { exact: true }).selectOption('single');
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.locator('.capture-preview img')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -175,16 +228,22 @@ test('unsupported browser retains annotation, preview, and export workflow', asy
   await expect(page.locator('.annotations ellipse')).toHaveCount(0);
 });
 
-test('human supersession and disable cancel captures without replacing the preview', async ({
+test('human supersession, Escape, disable and abort cancel screenshot preparation', async ({
   page,
 }) => {
   await setup(page);
-  for (const action of ['human', 'disable', 'abort']) {
+  for (const action of ['human', 'escape', 'disable', 'abort']) {
     await page.evaluate(() => {
-      const original = HTMLCanvasElement.prototype.toBlob;
-      HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
-        (window as any).__finishCapture = () => original.call(this, callback, ...args);
-        HTMLCanvasElement.prototype.toBlob = original;
+      // Hold animation frames to exercise cancellation during renderer/layout settlement.
+      const original = window.requestAnimationFrame;
+      const held: FrameRequestCallback[] = [];
+      window.requestAnimationFrame = (callback) => {
+        held.push(callback);
+        return 0;
+      };
+      (window as any).__finishCapture = () => {
+        window.requestAnimationFrame = original;
+        held.forEach((callback) => original(callback));
       };
       const abort = new AbortController();
       (window as any).__abortTool = abort;
@@ -192,25 +251,25 @@ test('human supersession and disable cancel captures without replacing the previ
         .get('capture_view')
         .execute({}, { signal: abort.signal });
     });
-    await expect
-      .poll(() => page.evaluate(() => typeof (window as any).__finishCapture))
-      .toBe('function');
+    await expect(page.locator('.screenshot-mode')).toHaveCount(1);
     if (action === 'human')
-      await page.getByRole('button', { name: 'Next slice', exact: true }).click();
+      await page.getByRole('button', { name: 'Restore controls' }).click({ force: true });
+    else if (action === 'escape') await page.keyboard.press('Escape');
     else if (action === 'disable') {
-      await page.getByText('Agent tools', { exact: true }).click();
-      await page.getByLabel('Enable agent tools').uncheck();
+      // The normal control remains mounted while hidden. Dispatch the same React click.
+      await page
+        .getByLabel('Disable agent tools')
+        .evaluate((input: HTMLButtonElement) => input.click());
     } else await page.evaluate(() => (window as any).__abortTool.abort());
     const result = await page.evaluate(() => (window as any).__pendingCapture);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/cancel|supersed/i);
-    await page.evaluate(() => {
-      (window as any).__finishCapture();
-      delete (window as any).__finishCapture;
-    });
+    await page.evaluate(() => (window as any).__finishCapture());
+    await expect(page.locator('.screenshot-mode')).toHaveCount(0);
     await expect(page.locator('.capture-preview')).toHaveCount(0);
     if (action === 'disable') {
-      await page.getByLabel('Enable agent tools').check();
+      await page.getByText('Agent tools', { exact: true }).click();
+      await page.getByLabel('Enable agent tools').click();
       await expect(page.getByText('Enabled for this session')).toBeVisible();
       await page.getByText('Agent tools', { exact: true }).click();
     }
@@ -288,10 +347,12 @@ test.describe('high-DPI capture', () => {
       action: 'add',
       ellipse: { id: 'dpi', x: 0.5, y: 0.5, rx: 0.2, ry: 0.1, color: 'cyan' },
     });
-    const bounds = (await page.locator('.imaging-canvas').boundingBox())!;
     const result = await call(page, 'capture_view', { pane: 1 });
     expect(result.ok).toBe(true);
+    const bounds = (await page.locator('.imaging-canvas').boundingBox())!;
     expect(result.result.width / result.result.height).toBeCloseTo(bounds.width / bounds.height, 2);
+    await call(page, 'close_capture');
+    await page.getByRole('button', { name: 'Export', exact: true }).click();
     const colors = await page.locator('.capture-preview img').evaluate(async (image) => {
       const source = image as HTMLImageElement;
       await source.decode();
@@ -341,10 +402,10 @@ test('agent control detects late browser injection without loading files or refr
   await page.goto('/');
   await page.getByText('Agent tools', { exact: true }).click();
   await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
+  await page.getByText('Connection diagnostics', { exact: true }).click();
   await expect(
     page.getByText('The browser has not exposed document.modelContext to this page.'),
   ).toBeVisible();
-  await page.getByText('Connection diagnostics', { exact: true }).click();
   await expect(page.getByLabel('WebMCP diagnostics')).toContainText(
     'document.modelContext: missing',
   );
@@ -354,7 +415,128 @@ test('agent control detects late browser injection without loading files or refr
       value: { registerTool() {}, unregisterTool() {} },
     });
   });
+  await expect(page.getByText('Agent tools are available in this browser.')).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Agent tools', exact: true }).click();
   await expect(page.getByLabel('Enable agent tools')).toBeEnabled();
-  await page.getByLabel('Enable agent tools').check();
+  await page.getByLabel('Enable agent tools').click();
   await expect(page.getByText('Enabled for this session')).toBeVisible();
+});
+
+test('screenshot isolates the requested pane, tracks live changes and restores layout without remounting', async ({
+  page,
+}) => {
+  await setup(page);
+  const set = (await call(page, 'get_viewer_state')).result.panes[0].displaySet;
+  await call(page, 'set_layout', { layout: 'columns-2' });
+  await call(page, 'assign_view', { pane: 2, displaySet: set, mode: 'acquired' });
+  await call(page, 'set_slice', { pane: 2, position: 2 });
+  await call(page, 'edit_annotations', {
+    pane: 2,
+    action: 'add',
+    ellipse: {
+      id: 'target',
+      x: 0.5,
+      y: 0.5,
+      rx: 0.12,
+      ry: 0.17,
+      color: 'red',
+    },
+  });
+  const before = (await call(page, 'get_viewer_state')).result;
+  const size = (await page.locator('.imaging-canvas').nth(1).boundingBox())!;
+  await page.evaluate(() => {
+    (window as any).__panes = Array.from(document.querySelectorAll('.imaging-canvas'));
+    (window as any).__canvases = Array.from(document.querySelectorAll('.imaging-canvas canvas'));
+  });
+  const captured = await call(page, 'capture_view', { pane: 2 });
+  expect(captured.ok, captured.error).toBe(true);
+  expect(captured.result.panes.map((p: any) => p.pane)).toEqual([2]);
+  expect(captured.result.width).toBeGreaterThan(size.width);
+  await expect(page.getByRole('button', { name: 'Restore controls' })).toBeFocused();
+  await expect(page.locator('.viewport').nth(0)).toBeHidden();
+  await expect(page.locator('.viewport').nth(1)).toBeVisible();
+  await expect(page.locator('.viewport').nth(1)).toContainText('Slice 2 / 7');
+  await expect(page.locator('.viewport').nth(1)).toContainText('1 screen mark');
+  await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('screenshot-view.png') });
+  expect((await call(page, 'get_viewer_state')).result.screenshot.changed).toBe(false);
+  expect((await call(page, 'set_slice', { pane: 2, position: 3 })).ok).toBe(true);
+  await expect(page.locator('.viewport').nth(1)).toContainText('Slice 3 / 7');
+  await expect(page.getByText('Changed since preparation', { exact: false })).toBeVisible();
+  await call(page, 'capture_view', { pane: 2 });
+  await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.app-header')).toBeVisible();
+  await expect(page.locator('.study-browser')).toBeVisible();
+  expect((await call(page, 'get_viewer_state')).result.layout).toBe(before.layout);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__panes.every(
+          (el: Element, i: number) => el === document.querySelectorAll('.imaging-canvas')[i],
+        ) &&
+        (window as any).__canvases.every(
+          (el: Element, i: number) => el === document.querySelectorAll('.imaging-canvas canvas')[i],
+        ),
+    ),
+  ).toBe(true);
+  await call(page, 'capture_view', { scope: 'workspace' });
+  await expect(page.locator('.viewport').nth(0)).toBeVisible();
+  await expect(page.locator('.viewport').nth(1)).toBeVisible();
+  await page.getByRole('button', { name: 'Restore controls' }).click();
+  await expect(page.locator('.screenshot-mode')).toHaveCount(0);
+});
+
+test('MPR screenshot resize and restoration preserve positions and rendered pixels', async ({
+  page,
+}) => {
+  await setup(page);
+  expect((await call(page, 'open_mpr', { pane: 1 })).ok).toBe(true);
+  const state = (await call(page, 'get_viewer_state')).result;
+  const pixels = () =>
+    page
+      .locator('.imaging-canvas canvas')
+      .evaluateAll((elements) => elements.map((el) => (el as HTMLCanvasElement).toDataURL()));
+  const before = await pixels();
+  const positions = state.panes.map((p: any) => p.displayed);
+  for (const args of [{ pane: 2 }, { scope: 'workspace' }, { pane: 3 }]) {
+    const captured = await call(page, 'capture_view', args);
+    expect(captured.ok, captured.error).toBe(true);
+    expect(
+      (await call(page, 'get_viewer_state')).result.panes.map((p: any) => p.displayed),
+    ).toEqual(positions);
+    expect((await call(page, 'close_capture')).ok).toBe(true);
+    await expect.poll(pixels).toEqual(before);
+  }
+});
+
+test('slow frozen export encoding is cancelled without replacing the existing preview', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const preview = page.locator('.capture-preview img');
+  await expect(preview).toBeVisible();
+  const originalUrl = await preview.getAttribute('src');
+  await expect(page.getByText('Viewer changed – this preview is unchanged.')).toHaveCount(0);
+  await page.evaluate(() => {
+    const original = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+      (window as any).__finishEncoding = () => original.call(this, callback, ...args);
+      HTMLCanvasElement.prototype.toBlob = original;
+    };
+  });
+  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).__finishEncoding))
+    .toBe('function');
+  // A new view supersedes the pending frozen capture; its old image remains downloadable.
+  expect((await call(page, 'set_slice', { pane: 1, position: 2 })).ok).toBe(true);
+  await page.evaluate(() => (window as any).__finishEncoding());
+  await expect(page.getByRole('alert')).toContainText('superseded');
+  await expect(preview).toHaveAttribute('src', originalUrl!);
+  expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(false);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(true);
 });

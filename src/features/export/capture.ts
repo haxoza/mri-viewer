@@ -7,6 +7,7 @@ import { interactionCancellation, settle } from '../../app/settlement';
 import { exportImage, type ExportOptions } from './service';
 import { useMarks } from '../annotations/model';
 export interface Capture {
+  signature: string;
   id: string;
   url: string;
   blob: Blob;
@@ -50,7 +51,7 @@ export function captureDefaults(
     overlays: true,
   };
 }
-function signature() {
+export function viewSignature() {
   const s = useSession.getState();
   return JSON.stringify({
     layout: s.layout,
@@ -61,6 +62,8 @@ function signature() {
       mode: p.mode,
       requested: p.requested,
       displayed: p.displayed,
+      pending: p.pending,
+      error: p.error,
       generation: controllers[i].generation,
       camera: controllers[i].viewport?.getCamera(),
       properties: controllers[i].viewport?.getProperties(),
@@ -100,11 +103,13 @@ export function createCapture(
             ]
           : [],
       );
-      const before = signature();
+      const before = viewSignature();
       const blob = await exportImage(options, workspace, signal);
       signal.throwIfAborted();
-      if (signature() !== before) throw new ViewerError('Capture superseded. Refresh the preview.');
+      if (viewSignature() !== before)
+        throw new ViewerError('Capture superseded. Refresh the preview.');
       const capture: Capture = {
+        signature: before,
         id: crypto.randomUUID(),
         url: URL.createObjectURL(blob),
         blob,

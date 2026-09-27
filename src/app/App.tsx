@@ -1,3 +1,6 @@
+import { ScreenshotBar } from '../features/agent/ScreenshotBar';
+import { executeCommand } from '../features/agent/commands';
+import { closeScreenshot, useScreenshot } from '../features/agent/screenshot';
 import { AgentTools } from '../features/agent/AgentTools';
 import {
   closeCapture,
@@ -24,7 +27,14 @@ export default function App() {
   const [dialog, setDialog] = useState<'metadata'>();
   const [exportWorkspace, setExportWorkspace] = useState<HTMLElement | null>(null);
   const captureOpen = useCapture((s) => s.open);
-  useEffect(() => () => closeCapture(), []);
+  const screenshot = useScreenshot((s) => s.view);
+  useEffect(
+    () => () => {
+      closeScreenshot();
+      closeCapture();
+    },
+    [],
+  );
   const [drop, setDrop] = useState(false);
   const [split, setSplit] = useState(60);
   const files = useRef<HTMLInputElement>(null),
@@ -44,7 +54,7 @@ export default function App() {
   };
   return (
     <div
-      className="app"
+      className={`app ${screenshot ? 'screenshot-mode' : ''}`}
       onDragOver={(e) => {
         e.preventDefault();
         if (!importing) setDrop(true);
@@ -143,6 +153,14 @@ export default function App() {
         }}
       />
       <Toolbar
+        onScreenshot={(scope) => {
+          if (workspace.current)
+            void executeCommand('capture_view', { scope }, workspace.current).catch((error) =>
+              useSession.setState({
+                notice: error instanceof Error ? error.message : 'Screenshot preparation failed.',
+              }),
+            );
+        }}
         onMetadata={() => {
           pause();
           setDialog('metadata');
@@ -209,10 +227,12 @@ export default function App() {
           </button>
         </div>
       )}
+      {screenshot && <ScreenshotBar />}
       <main className={sidebar ? 'with-sidebar' : ''}>
         <div
           ref={workspaceRef}
           className={`workspace layout-${layout}`}
+          data-screenshot-pane={screenshot?.pane}
           style={{ '--split': `${split}%`, '--rest': `${100 - split}%` } as CSSProperties}
         >
           {Array.from({ length: paneCount(layout) }, (_, i) => (

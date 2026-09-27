@@ -1,3 +1,6 @@
+import { useScreenshot } from '../agent/screenshot';
+import { viewLabel } from '../agent/labels';
+import { useMarks } from '../annotations/model';
 import { viewerActions } from '../../app/actions';
 import { useEffect, useRef, useState } from 'react';
 import { VolumeViewport, Enums } from '@cornerstonejs/core';
@@ -17,6 +20,8 @@ export function Viewport({ index }: { index: number }) {
   const p = useSession((s) => s.panes[index]);
   const active = useSession((s) => s.active === index);
   const set = getSet(p.setId);
+  const screenshot = useScreenshot((s) => s.view);
+  const marks = useMarks((s) => s.panes[index]);
   const c = controllers[index];
   const [cross, setCross] = useState<number[]>();
   useEffect(() => {
@@ -146,7 +151,8 @@ export function Viewport({ index }: { index: number }) {
   const frame = set?.frames[p.mode === 'stack' ? Math.max(0, p.displayed) : 0];
   return (
     <section
-      className={`viewport ${active ? 'active' : ''}`}
+      className={`viewport ${active ? 'active' : ''} ${screenshot?.pane === index ? 'screenshot-target' : ''}`}
+      inert={screenshot?.pane !== undefined && screenshot.pane !== index}
       aria-label={`Pane ${index + 1}`}
       onPointerDown={() => viewerActions.setActivePane(index)}
     >
@@ -184,9 +190,18 @@ export function Viewport({ index }: { index: number }) {
       <div className="pane-top">
         <span className="pane-badge">{index + 1}</span>
         <span>
-          {set ? frame?.seriesDescription : 'No series selected'}
+          {set
+            ? screenshot
+              ? viewLabel(p.setId)
+              : frame?.seriesDescription
+            : 'No series selected'}
           <small>{p.mode === 'stack' ? set?.orientation : `${p.mode} · reconstruction`}</small>
         </span>
+        {screenshot && set && (
+          <span className="screenshot-marks">
+            {marks.length} screen {marks.length === 1 ? 'mark' : 'marks'}
+          </span>
+        )}
         {set && (
           <button
             className={p.linked ? 'selected' : ''}
@@ -248,7 +263,13 @@ export function Viewport({ index }: { index: number }) {
         <div className="pane-status" role="status">
           {p.pending
             ? `Loading target ${p.requested + 1}…`
-            : (p.error ?? p.linkStatus ?? set?.warning)}
+            : screenshot
+              ? p.error
+                ? 'Rendering failed'
+                : p.linkStatus
+                  ? 'Link unavailable'
+                  : 'Geometry warning'
+              : (p.error ?? p.linkStatus ?? set?.warning)}
           {p.error && <button onClick={() => c.retry()}>Retry</button>}
         </div>
       )}

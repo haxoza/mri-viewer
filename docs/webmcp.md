@@ -1,41 +1,68 @@
-# Agent tools and frozen captures
+# Agent screenshot views and frozen exports
 
-Start `npm run dev`, open its localhost URL in Codex desktop, load local files,
-and enable **Agent tools → Enable for this session**. Enabling allows all listed
-viewer operations and captures until disabled or the page is closed/reloaded.
-If the browser lacks `document.modelContext.registerTool`, the control explains
-that tools are unavailable; manual viewing, marks and exports remain usable.
-Registrations use an `AbortSignal` so disabling the control removes tools even
-when the browser does not expose an `unregisterTool` method.
+Start `npm run dev`, open its localhost URL in ChatGPT Work or Codex desktop,
+load local files, and enable **Agent tools → Enable for this session**. Enabling
+allows the listed operations until disabled or the page is closed/reloaded.
+Unsupported browsers keep manual viewing, marks and exports. Registrations use
+an `AbortSignal`, including when the browser has no `unregisterTool` method.
 
 **DICOM files stay in this browser. Images shared with your desktop agent enter that agent's conversation.**
-Captured pixels may contain burned-in identifiers. Agent processing and retention
-follow your Codex configuration and service. No provider SDK, API key, backend,
-remote assets, analytics or persistent examination storage is added.
+Pixels may contain burned-in identifiers. Processing and retention follow the
+agent's configuration and service. No provider SDK, API key, backend, remote
+assets, analytics or persistent examination storage is added.
+
+## Why prepare a browser screenshot?
+
+Checked on 2026-09-28: the [WebMCP draft](https://webmachinelearning.github.io/webmcp/)
+serializes imperative tool results as JSON. The [OpenAI site-tools documentation](https://learn.chatgpt.com/docs/webmcp)
+describes operating and inspecting a shared live page, but does not document an
+image attachment result contract. Returning base64 inside JSON is therefore not
+a verified way to deliver model-visible image content. This viewer prepares the
+page and explicitly asks the agent to take a browser screenshot. Native support
+for image results could be revisited if a documented contract becomes available.
 
 ## Viewing and sharing
 
 - Choose **Ellipse**, a red/yellow/cyan color, and drag on a pane. **Undo mark**
   reverses the last annotation edit; **Clear marks** clears the active pane.
-  Marks are normalized screen coordinates. They remain fixed through navigation,
-  pan, zoom and resizing, without anatomical tracking or measurements. Removing
-  the examination or reloading clears them.
-- **Export** pauses cine and opens a frozen preview with a capture ID, dimensions
-  and pane positions. Change output settings then choose **Refresh preview**.
-  **Download image** always downloads the displayed capture, including its format
-  and dimensions, and closes the dialog.
+  Marks use normalized screen coordinates and remain fixed through navigation,
+  pan, zoom and resizing. They have no anatomical tracking or measurement meaning.
+  Removing the examination or reloading clears them.
+- For manual use, choose **Screenshot view** beside Export, then **Active pane**
+  or **Whole workspace**. Agent tools do not need to be enabled or supported.
+  This only prepares the view; take the screenshot with your usual browser/OS tool.
 - Ask the agent to call `capture_view` for the active pane, a specified visible
-  pane, or workspace. It opens the same preview. Ask the agent to inspect it using
-  a browser screenshot. Serialized tool results contain context, not image bytes.
-- Navigation leaves a preview unchanged. Capture again to discuss another view.
-  Only one preview is retained; replacing or closing it revokes its object URL.
+  pane, or workspace. It pauses cine, hides app controls/sidebar/navigation,
+  expands the view, waits for rendering and returns safe pane context. It does
+  not encode an image, open Export, download anything or send image bytes.
+- The agent takes a **browser screenshot** once the tool succeeds. The compact
+  bar reads **Live view** and **Ready for screenshot**. Pane numbers, session-only
+  **View N** labels, orientation, slice/plane positions and screen marks remain
+  visible. View labels match the tool catalog; DICOM series descriptions are
+  hidden in this mode. Source pixels can still contain identifiers.
+- This is live: navigation changes the pixels and labels. The bar reports
+  **Changed since preparation** when viewing context changes; call `capture_view`
+  again before inspecting the next screenshot. `get_viewer_state.screenshot`
+  exposes the preparation ID, isolated pane (null for workspace) and changed flag.
+- **Restore controls**, **Escape**, or `close_capture` exits screenshot mode.
+  Tool disable/unmount and failed/cancelled preparation also restore controls.
+  The original layout, sidebar preference and pane instances are retained.
+  Layout changes or `open_mpr` exit isolation before changing the workspace.
+  Cine stays paused after restoration.
+- Close an open modal before calling `capture_view`; the tool reports an error
+  instead of discarding a frozen export or capturing an obscuring dialog.
+- **Export** remains a separate frozen-image workflow. It opens a preview with
+  capture ID, dimensions and pane positions. Navigation leaves it unchanged;
+  a warning identifies changes in the viewer or output settings. Choose
+  **Refresh preview** to apply them. **Download image** always downloads the
+  displayed capture, including its format/dimensions, then closes the dialog.
+  Only one frozen image is retained; replacement/close revokes its object URL.
 
 ## Command contract
 
-All panes and positions are one-based. Display-set/study/series aliases are valid
-only in this page session. Read `get_viewer_state` to obtain them. Returned state
-contains only numeric viewing context, readiness, screen marks, derived orientation
-and dimensions/counts; it omits DICOM UIDs, dates, filenames and free-text metadata.
+Panes and positions are one-based. Aliases and View labels are session-only;
+read `get_viewer_state` for the current catalog. Results omit DICOM UIDs, dates,
+filenames and unrestricted metadata/free text.
 
 | Tool | Arguments |
 | --- | --- |
@@ -49,53 +76,64 @@ and dimensions/counts; it omits DICOM UIDs, dates, filenames and free-text metad
 | `open_mpr` | `pane` |
 | `set_crosshair` | `pane`, normalized `x`, `y` |
 | `edit_annotations` | `pane`, `action`: add/update/remove/undo/clear; add/update requires `ellipse: {id,x,y,rx,ry,color}`, remove requires `id` |
-| `capture_view` | optional `scope`: active/workspace; optional `pane` for an individual pane |
-| `close_capture` | `{}` |
+| `capture_view` | optional `scope`: active/workspace (default active); optional `pane` for an individual pane |
+| `close_capture` | `{}`; restore controls and close any frozen Export preview |
 
-Tool calls return `{ok:true,result}` or `{ok:false,error}`. Mutation calls serialize
-and wait for rendering, including linked panes and MPR. Calls have a 60-second
-budget and render waits are bounded. Human gestures or tool cancellation supersede
-pending work; read current state before retrying. Disabling tools aborts active and
-queued calls and unregisters tools, including registrations that finish late.
+Tools return `{ok:true,result}` or `{ok:false,error}`. `capture_view` returns
+`captureId` (a preparation ID, not a stored image), `live:true`, CSS-pixel `width`
+and `height`, selected `panes` with catalog aliases/labels, displayed/requested
+positions, readiness, viewing settings and annotations, plus screenshot instructions.
+It retains the existing tool name and argument schema, but replaces the former
+frozen-image result semantics. Empty/unavailable targets and contradictory scope
+arguments fail explicitly. Success describes the settled view at return time;
+subsequent human/agent actions can change it before the browser screenshot.
 
-`src/app/actions.ts` contains typed operations shared with UI controls;
+Mutation calls serialize and wait for rendering, including linked panes and MPR.
+Calls have a 60-second budget and bounded render waits. Human gestures and tool
+cancellation supersede pending work; read current state before retrying. Disable
+aborts active/queued calls and unregisters tools, including late registrations.
+
+`src/app/actions.ts` contains shared typed operations;
 `src/features/agent/commands.ts` validates and schedules calls;
-`src/features/agent/webmcp.ts` handles the browser API lifecycle. Capture and
-annotation services are usable independently of WebMCP.
+`src/features/agent/webmcp.ts` manages browser registrations;
+`screenshot.ts` and `ScreenshotBar.tsx` manage live screenshot presentation.
+Export and annotations remain independently usable.
 
-## Verification status and deferred desktop check
+## Verification
 
-Validation covers lint, type checking, build, privacy guard, 18 unit tests and
-19 browser tests. High-DPI capture, annotation pixels, delayed API injection,
-signal-based tool removal and slow preview encoding are included.
+The original desktop tool-discovery check passed on 2026-09-26: enabling tools
+exposed 12 registrations and disabling removed them. The user subsequently
+reported that ChatGPT Work opens Export via `capture_view`, then screenshots it.
 
-Automated tests use generated synthetic DICOM, an imperative WebMCP test double,
-and real Chromium rendering. This verifies application behavior, not native Codex
-site-tool discovery or image inspection.
+On 2026-09-28, the live localhost Chrome viewer was loaded with seven generated
+synthetic slices and Export at slice 2 was inspected through accessibility.
+The existing Chromium WebMCP test-double workflow passed before implementation;
+its screenshot confirmed the red ellipse and slice 2, a preview capped at 55vh,
+small captions and export controls extending below the fold. Frozen navigation
+and byte-identical downloads passed. The native desktop bridge was unavailable
+in this coding session; desktop UI access was blocked, and native Chrome's
+screenshot capture returned blank. Visual review used synthetic Chromium test
+artifacts. This is not a new native ChatGPT Work integration certification.
 
-**Codex desktop basic WebMCP check passed on 2026-09-26.** In the built-in
-browser at `localhost:5173`, enabling the control exposed 12 tools,
-`get_viewer_state` returned an empty-session state, and disabling removed all
-tools. The full capture workflow with loaded DICOM remains to be checked.
+Browser regressions cover live pane isolation, ready/changed state, restoration,
+cancellation, linked/MPR settlement, renderer preservation, privacy, frozen
+preview/downloads, high-DPI exports and delayed registration/encoding.
+Validation passed on 2026-09-28: `npm run check` (lint, 18 unit tests, type
+checking, build and privacy guard), all 22 production browser tests, and all 22
+development-server browser tests. Commands: `npm run test:e2e` and
+`VIEWER_DEV=1 npm run test:e2e`.
 
-When available:
+For a native desktop follow-up:
 
-1. Run `node scripts/create-webmcp-sample.mjs` to create seven synthetic slices
-   under ignored `local-data/`. Start `npm run dev` and open the localhost URL
-   in Codex desktop.
-2. Load synthetic DICOM and enable Agent tools. Discover `get_viewer_state`.
-3. Set slice 2, add a colored ellipse, then call `capture_view`.
-4. Inspect the visible preview using Codex's screenshot capability and confirm
-   the mark and slice label are readable.
-5. Navigate to slice 3; confirm the original preview remains on slice 2. Capture
-   again, close the capture, then disable tools and confirm they disappear.
-6. Record the actual desktop app version, selected model, and result here.
-
-Run `npm run check`, `npm run test:e2e` and
-`VIEWER_DEV=1 npm run test:e2e` for automated validation.
-
-API references: [OpenAI site tools](https://learn.chatgpt.com/docs/webmcp) and
-[WebMCP specification](https://webmachinelearning.github.io/webmcp/).
+1. Run `node scripts/create-webmcp-sample.mjs` and load the generated folder
+   from ignored `local-data/` in the localhost viewer.
+2. Enable tools, set slice 2 and add an ellipse with the agent.
+3. Call `capture_view`, then take a browser screenshot. Confirm the pane, View
+   label, slice and ellipse are readable and app controls are hidden.
+4. Set slice 3. Confirm live pixels/labels change and the bar reports a changed
+   view. Prepare again, screenshot, and call `close_capture`.
+5. Check workspace and individual MPR panes, **Restore controls**, and Escape.
+6. Record the desktop app version, selected model and native tool results.
 
 ## CI export regression
 

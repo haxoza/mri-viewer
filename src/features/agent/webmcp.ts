@@ -1,3 +1,4 @@
+import { closeScreenshot } from './screenshot';
 import { probeWebMcp } from './capabilities';
 import { ViewerError, memoryError } from '../../app/errors';
 import { executeCommand, schemas, type CommandName } from './commands';
@@ -34,8 +35,9 @@ const descriptions: Record<CommandName, string> = {
   edit_annotations:
     'Edit colored ellipses in normalized pane coordinates. These are fixed screen marks, without anatomical tracking or measurements. Undo or clear marks in one pane.',
   capture_view:
-    'Pause cine and open a frozen PNG Export preview of the active pane, specified visible pane, or workspace. Inspect it using a browser screenshot. Captured pixels may contain burned-in identifiers and enter the agent conversation. Navigation does not update the preview.',
-  close_capture: 'Close the Export preview and release the captured image.',
+    'Prepare the active pane, a specified visible pane, or workspace for a browser screenshot. Pause cine, hide app controls, maximize panes, retain safe labels and screen marks, and wait for rendering. Returns context, not image bytes. The view is live: navigation updates it. Take a browser screenshot, then call close_capture to restore controls. Pixels may contain burned-in identifiers and enter the agent conversation. Close any dialog first.',
+  close_capture:
+    'Restore normal viewer controls after capture_view. Also closes any frozen Export preview and releases its image.',
 };
 // Serialize registration and teardown too: an asynchronous registration may finish
 // after disable/unmount, and must not leave a late tool registered.
@@ -53,6 +55,7 @@ export function registerAgentTools(
   const registered: string[] = [];
   const remove = async () => {
     lifetime.abort();
+    closeScreenshot();
     if (api.unregisterTool) {
       for (const name of registered.splice(0)) await api.unregisterTool(name);
     } else registered.length = 0;
@@ -100,6 +103,7 @@ export function registerAgentTools(
       else onStatus('Enabled for this session');
     } catch {
       lifetime.abort();
+      closeScreenshot();
       await remove();
       onStatus('Registration failed; manual viewing remains available');
     }
@@ -107,6 +111,7 @@ export function registerAgentTools(
   lifecycle = lifecycle.then(install, install);
   return () => {
     lifetime.abort();
+    closeScreenshot();
     lifecycle = lifecycle.then(remove, remove);
   };
 }

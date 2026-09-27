@@ -9,7 +9,9 @@ import { controllers, pause, cancelMpr } from '../../imaging/rendering/controlle
 import { volumeProblem } from '../../imaging/geometry';
 import { allSets } from '../../imaging/catalog';
 import { editMarks, useMarks, type Ellipse } from '../annotations/model';
-import { captureDefaults, closeCapture, createCapture } from '../export/capture';
+import { closeCapture, viewSignature } from '../export/capture';
+import { beginScreenshot, closeScreenshot, useScreenshot } from './screenshot';
+import { viewLabel } from './labels';
 const layouts: Layout[] = [
   'single',
   'columns-2',
@@ -142,16 +144,26 @@ function alias(key: string, prefix: string) {
 }
 export function viewerState() {
   const s = useSession.getState();
+  const screenshot = useScreenshot.getState().view;
   return {
     revision,
     layout: s.layout,
     activePane: s.active + 1,
+    screenshot: screenshot
+      ? {
+          id: screenshot.id,
+          pane: screenshot.pane === undefined ? null : screenshot.pane + 1,
+          live: true,
+          changed: screenshot.signature !== viewSignature(),
+        }
+      : null,
     panes: s.panes.slice(0, paneCount(s.layout)).map((p, i) => {
       const v = controllers[i].viewport,
         range = v?.getProperties()?.voiRange;
       return {
         pane: i + 1,
         displaySet: p.setId ? alias(p.setId, 'set') : null,
+        label: viewLabel(p.setId),
         mode: p.mode === 'stack' ? 'acquired' : p.mode,
         displayed: p.displayed < 0 ? null : p.displayed + 1,
         requested: p.requested + 1,
@@ -176,6 +188,7 @@ export function viewerState() {
         id: alias(series.uid, 'series'),
         displaySets: series.sets.map((set) => ({
           id: alias(set.id, 'set'),
+          label: viewLabel(set.id),
           orientation: set.orientation,
           rows: set.frames[0].rows,
           columns: set.frames[0].columns,
@@ -231,29 +244,63 @@ export function executeCommand<N extends CommandName>(
             'Supply width and center together, pan dx and dy together, or zoom/operation.',
           );
       }
-      if (name === 'set_layout')
+      if (name === 'set_layout') {
+        closeScreenshot();
         viewerActions.setLayout((input as CommandArguments['set_layout']).layout);
-      else if (name === 'close_capture') {
+      } else if (name === 'close_capture') {
+        closeScreenshot();
         closeCapture();
+        await settle(signal);
         return { closed: true };
       } else if (name === 'capture_view') {
         const a = input as CommandArguments['capture_view'];
         if (a.scope === 'workspace' && a.pane !== undefined)
           throw new ViewerError('Workspace captures cannot specify a pane.');
-        const index = a.pane === undefined ? undefined : visiblePane(a.pane);
-        const c = await createCapture(
-          captureDefaults(workspace, a.scope, index),
-          workspace,
-          signal,
-        );
-        return {
-          captureId: c.id,
-          width: c.width,
-          height: c.height,
-          panes: c.panes,
-          instruction:
-            'Inspect the frozen Export preview with a browser screenshot. Navigation does not update this capture.',
-        };
+        const index =
+          a.scope === 'workspace'
+            ? undefined
+            : visiblePane(a.pane ?? useSession.getState().active + 1);
+        if (
+          !useSession
+            .getState()
+            .panes.slice(0, paneCount(useSession.getState().layout))
+            .some((p) => p.setId)
+        )
+          throw new ViewerError('Open an image before preparing a screenshot.');
+        // Preserve frozen downloads. A modal would obscure the screenshot.
+        if (document.querySelector('dialog[open]'))
+          throw new ViewerError('Close the open dialog before preparing a screenshot.');
+        const { view, controller } = beginScreenshot(index);
+        const captureSignal = AbortSignal.any([signal, controller.signal]);
+        try {
+          // Commit layout, resize existing renderers, and paint labels before returning.
+          await settle(captureSignal);
+          await abortable(
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+            captureSignal,
+          );
+          await settle(captureSignal);
+          captureSignal.throwIfAborted();
+          useScreenshot.setState({ view: { ...view, signature: viewSignature() } });
+          const state = viewerState();
+          const rect = (
+            index === undefined ? workspace : controllers[index].element!
+          ).getBoundingClientRect();
+          return {
+            captureId: view.id,
+            live: true,
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            panes: state.panes.filter((p) => index === undefined || p.pane === index + 1),
+            instruction:
+              'Take a browser screenshot now. This is the live viewer, not a frozen image; navigation updates pixels and labels. Call capture_view again after changes. Call close_capture when finished to restore controls. Pixels may contain burned-in identifiers.',
+          };
+        } catch (error) {
+          if (useScreenshot.getState().view?.id === view.id) closeScreenshot();
+          throw error;
+        }
       } else {
         const a = input as Exclude<CommandArguments[CommandName], Record<string, never>> & {
           pane: number;
@@ -297,6 +344,7 @@ export function executeCommand<N extends CommandName>(
             viewerActions.setLinked(index, (input as CommandArguments['set_linked']).linked);
             break;
           case 'open_mpr': {
+            closeScreenshot();
             const set = getSet(useSession.getState().panes[index].setId)!;
             if (volumeProblem(set))
               throw new ViewerError('This display set does not support reconstruction.');

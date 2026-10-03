@@ -176,7 +176,6 @@ test('serialized commands settle linked panes and MPR; workspace excludes hidden
 test('unsupported browser retains annotation, preview, and export workflow', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Agent tools', { exact: true }).click();
-  await page.screenshot({ path: test.info().outputPath('agent-menu.png') });
   await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
   await page.getByText('Agent tools', { exact: true }).click();
   const screenshotButton = page.getByRole('button', { name: 'Screenshot view', exact: true });
@@ -204,7 +203,6 @@ test('unsupported browser retains annotation, preview, and export workflow', asy
   await page.getByLabel('Layout', { exact: true }).selectOption('columns-2');
   for (const scope of ['Active pane', 'Whole workspace']) {
     await page.getByText('Screenshot view', { exact: true }).click();
-    await page.screenshot({ path: test.info().outputPath('screenshot-menu.png') });
     await page.getByRole('menuitem', { name: scope, exact: true }).click();
     await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
     await expect(page.locator('.app-header')).toBeHidden();
@@ -462,7 +460,6 @@ test('screenshot isolates the requested pane, tracks live changes and restores l
   await expect(page.locator('.viewport').nth(1)).toContainText('Slice 2 / 7');
   await expect(page.locator('.viewport').nth(1)).toContainText('1 screen mark');
   await expect(page.getByText('Ready for screenshot', { exact: false })).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath('screenshot-view.png') });
   expect((await call(page, 'get_viewer_state')).result.screenshot.changed).toBe(false);
   expect((await call(page, 'set_slice', { pane: 2, position: 3 })).ok).toBe(true);
   await expect(page.locator('.viewport').nth(1)).toContainText('Slice 3 / 7');

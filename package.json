@@ -1,7 +1,7 @@
 {
   "name": "local-mri-viewer",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -13,9 +13,11 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check:privacy": "node scripts/check-privacy.mjs",
-    "check": "npm run lint && npm run test && npm run build && npm run check:privacy",
-    "lint": "oxlint --deny-warnings src tests vite.config.ts playwright.config.ts",
-    "format": "oxfmt src tests scripts vite.config.ts playwright.config.ts",
+    "check": "npm run lint && npm run format:check && npm run test && npm run build && npm run check:privacy",
+    "lint": "oxlint --deny-warnings .",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "notices": "node scripts/dependency-notices.mjs"
   },
   "dependencies": {

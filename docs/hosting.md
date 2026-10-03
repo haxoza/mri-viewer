@@ -21,7 +21,7 @@ npm run deploy
 VIEWER_URL=https://mri-viewer.haxoza.com npm run test:e2e
 ```
 
-`npm run deploy` runs lint, unit tests, the production build, and the privacy guard before uploading. Browser checks use generated synthetic examinations and keep traces and screenshots disabled. `VIEWER_URL` runs them against an existing deployment without starting a local server.
+`npm run deploy` runs lint, formatting checks, unit tests, the production build, and the privacy guard before uploading. Browser checks use generated synthetic examinations and keep traces and screenshots disabled. `VIEWER_URL` runs them against an existing deployment without starting a local server.
 
 Before the first deployment, check that the Worker name and custom hostname are unused. Never accept a prompt to replace an existing DNS record or move a hostname from another Worker. `npm run deploy` refuses to run without an interactive terminal: Wrangler can automatically replace conflicting custom-domain records in non-interactive mode. Do not bypass this guard for unattended deployment until it has explicit conflict checks.
 

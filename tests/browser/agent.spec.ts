@@ -331,11 +331,14 @@ test('reconstruction failures report unsupported geometry and memory; acquired v
 
 test.describe('high-DPI capture', () => {
   test.use({ deviceScaleFactor: 2 });
-  test('preserves aspect ratio, colored marks, and local-only processing', async ({ page }) => {
+  test('preserves aspect ratio, colored marks, and local-only processing', async ({
+    page,
+    baseURL,
+  }) => {
     const external: string[] = [];
     page.on('request', (request) => {
       if (
-        !request.url().startsWith('http://127.0.0.1:4173') &&
+        new URL(request.url()).origin !== new URL(baseURL!).origin &&
         !request.url().startsWith('blob:') &&
         !request.url().startsWith('data:')
       )

@@ -31,12 +31,15 @@ async function refreshPreview(page: Page) {
   await expect(preview).not.toHaveAttribute('src', previous!);
   await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
 }
-test('local import, navigation, comparison, MPR, and exact-size export', async ({ page }) => {
+test('local import, navigation, comparison, MPR, and exact-size export', async ({
+  page,
+  baseURL,
+}) => {
   test.slow();
   const external: string[] = [];
   page.on('request', (r) => {
     if (
-      !r.url().startsWith('http://127.0.0.1:4173') &&
+      new URL(r.url()).origin !== new URL(baseURL!).origin &&
       !r.url().startsWith('blob:') &&
       !r.url().startsWith('data:')
     )

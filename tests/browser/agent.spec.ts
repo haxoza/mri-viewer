@@ -20,6 +20,18 @@ async function call(page: Page, name: string, args: object = {}): Promise<Result
     { name, args },
   );
 }
+async function openSettings(page: Page) {
+  const settings = page.locator('.session-settings');
+  if (!(await settings.evaluate((element) => element.hasAttribute('open'))))
+    await page.getByText('Settings', { exact: true }).click();
+}
+async function toggleAgentTools(page: Page) {
+  await openSettings(page);
+  const trigger = page.getByRole('button', { name: 'Agent tools', exact: true });
+  const closing = (await trigger.getAttribute('aria-expanded')) === 'true';
+  await trigger.click();
+  if (closing) await page.getByText('Settings', { exact: true }).click();
+}
 async function setup(page: Page) {
   await page.addInitScript(() => {
     const tools = new Map();
@@ -56,10 +68,10 @@ async function setup(page: Page) {
   await page.goto('/');
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
   await page.getByLabel('Enable agent tools').click();
   await expect(page.getByText('Enabled for this session')).toBeVisible();
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
 }
 test('tool catalog, validation, one-based navigation, annotations, frozen captures and disable', async ({
   page,
@@ -131,7 +143,7 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   expect((await call(page, 'edit_annotations', { pane: 1, action: 'clear' })).ok).toBe(true);
   expect((await call(page, 'edit_annotations', { pane: 1, action: 'undo' })).ok).toBe(true);
   expect((await call(page, 'get_viewer_state')).result.panes[0].annotations).toEqual([mark]);
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
   await page.getByLabel('Disable agent tools').click();
   await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(0);
   await page.getByLabel('Enable agent tools').click();
@@ -175,9 +187,12 @@ test('serialized commands settle linked panes and MPR; workspace excludes hidden
 
 test('unsupported browser retains annotation, preview, and export workflow', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
   await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
+  await expect(page.getByRole('button', { name: 'Screenshot view', exact: true })).toHaveCount(0);
+  await page.getByLabel('Open DICOM files').setInputFiles(files);
+  await expect(page.getByLabel('Slice number')).toHaveValue('4');
   const screenshotButton = page.getByRole('button', { name: 'Screenshot view', exact: true });
   await screenshotButton.click();
   await expect(page.getByRole('menu', { name: 'Screenshot view' })).toBeVisible();
@@ -187,7 +202,6 @@ test('unsupported browser retains annotation, preview, and export workflow', asy
   await screenshotButton.click();
   await page.locator('.brand').click();
   await expect(screenshotButton).toHaveAttribute('aria-expanded', 'false');
-  await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
   await page.getByRole('button', { name: 'Ellipse', exact: true }).click();
   const box = (await page.locator('.annotations').boundingBox())!;
@@ -266,10 +280,10 @@ test('human supersession, Escape, disable and abort cancel screenshot preparatio
     await expect(page.locator('.screenshot-mode')).toHaveCount(0);
     await expect(page.locator('.capture-preview')).toHaveCount(0);
     if (action === 'disable') {
-      await page.getByText('Agent tools', { exact: true }).click();
+      await toggleAgentTools(page);
       await page.getByLabel('Enable agent tools').click();
       await expect(page.getByText('Enabled for this session')).toBeVisible();
-      await page.getByText('Agent tools', { exact: true }).click();
+      await toggleAgentTools(page);
     }
     expect((await call(page, 'set_slice', { pane: 1, position: 2 })).ok).toBe(true);
   }
@@ -304,7 +318,9 @@ test('reconstruction failures report unsupported geometry and memory; acquired v
   await page.getByLabel('Open DICOM files').setInputFiles(rest);
   await expect(page.getByText('5 frames imported')).toBeVisible();
   catalog = (await call(page, 'get_viewer_state')).result.studies[0].series;
+  await openSettings(page);
   await page.getByLabel('Memory profile').selectOption('low');
+  await page.getByText('Settings', { exact: true }).click();
   expect((await call(page, 'assign_view', { pane: 1, displaySet: first, mode: 'axial' })).ok).toBe(
     true,
   );
@@ -401,7 +417,7 @@ test('agent control detects late browser injection without loading files or refr
   page,
 }) => {
   await page.goto('/');
-  await page.getByText('Agent tools', { exact: true }).click();
+  await toggleAgentTools(page);
   await expect(page.getByLabel('Enable agent tools')).toBeDisabled();
   await page.getByText('Connection diagnostics', { exact: true }).click();
   await expect(
@@ -418,7 +434,7 @@ test('agent control detects late browser injection without loading files or refr
   });
   await expect(page.getByText('Agent tools are available in this browser.')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('button', { name: 'Agent tools', exact: true }).click();
+  await toggleAgentTools(page);
   await expect(page.getByLabel('Enable agent tools')).toBeEnabled();
   await page.getByLabel('Enable agent tools').click();
   await expect(page.getByText('Enabled for this session')).toBeVisible();

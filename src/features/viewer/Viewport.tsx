@@ -15,6 +15,7 @@ import { WheelSteps } from '../../imaging/tools/navigation';
 import { direction } from '../../imaging/geometry';
 import { panView, zoomView, windowView } from '../../app/viewActions';
 import { AnnotationOverlay } from '../annotations/AnnotationOverlay';
+import './viewport.css';
 export function Viewport({ index }: { index: number }) {
   const element = useRef<HTMLDivElement>(null);
   const p = useSession((s) => s.panes[index]);
@@ -189,13 +190,17 @@ export function Viewport({ index }: { index: number }) {
       )}
       <div className="pane-top">
         <span className="pane-badge">{index + 1}</span>
-        <span>
-          {set
-            ? screenshot
-              ? viewLabel(p.setId)
-              : frame?.seriesDescription
-            : 'No series selected'}
-          <small>{p.mode === 'stack' ? set?.orientation : `${p.mode} · reconstruction`}</small>
+        <span className="pane-identity">
+          <span className="pane-title">
+            {set
+              ? screenshot
+                ? viewLabel(p.setId)
+                : frame?.seriesDescription
+              : 'No series selected'}
+          </span>
+          <small className="pane-description">
+            {p.mode === 'stack' ? set?.orientation : `${p.mode} · reconstruction`}
+          </small>
         </span>
         {screenshot && set && (
           <span className="screenshot-marks">
@@ -204,12 +209,18 @@ export function Viewport({ index }: { index: number }) {
         )}
         {set && (
           <button
-            className={p.linked ? 'selected' : ''}
+            className={`pane-link ${p.linked ? 'selected' : ''}`}
             aria-label={`Link pane ${index + 1}`}
             aria-pressed={p.linked}
+            title={
+              p.mode === 'stack'
+                ? `${p.linked ? 'Unlink' : 'Link'} slice position with other linked stack panes`
+                : 'Link applies to stack slice positions. MPR planes share the crosshair.'
+            }
             onClick={() => viewerActions.setLinked(index, !p.linked)}
           >
             Link
+            <span className="pane-link-state"> {p.linked ? 'on' : 'off'}</span>
           </button>
         )}
       </div>
@@ -234,20 +245,24 @@ export function Viewport({ index }: { index: number }) {
                 : 'R'}
           </span>
           <div className="pane-bottom">
-            <span>
-              {p.mode === 'stack' ? 'Slice' : 'Plane position'}{' '}
+            <span className="pane-position">
+              <span className="pane-position-label">
+                {p.mode === 'stack' ? 'Slice' : 'Plane position'}
+              </span>{' '}
               {p.displayed < 0 ? '–' : p.displayed + 1} / {p.total || '–'}
               {p.relative !== undefined && Number.isFinite(p.relative) && (
-                <small>
+                <small className="pane-detail">
                   Relative {p.relative.toFixed(1)} mm
                   {set.normal && p.mode === 'stack' ? ` · toward ${direction(set.normal)}` : ''}
                   {p.step ? ` · ${p.step.toFixed(2)} mm / step` : ''}
                 </small>
               )}
             </span>
-            <span>
+            <span className="pane-window">
               W / C {p.window ?? '–'}
-              <small>Zoom {p.zoom ? `${Math.round(p.zoom * 100)}%` : '–'}</small>
+              <small className="pane-detail">
+                Zoom {p.zoom ? `${Math.round(p.zoom * 100)}%` : '–'}
+              </small>
             </span>
           </div>
         </>

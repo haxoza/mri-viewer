@@ -9,4 +9,6 @@ for (let i = 0; i < 7; i++) {
   await writeFile(join(directory, `slice-${i + 1}.dcm`), dicom(i), { flag: 'wx' });
 }
 console.log(`Synthetic sample created: ${directory}`);
-console.log('Use Open folder in the viewer to load it. These generated files contain no patient data.');
+console.log(
+  'Use Open folder in the viewer to load it. These generated files contain no patient data.',
+);

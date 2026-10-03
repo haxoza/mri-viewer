@@ -14,14 +14,22 @@ npm run dev
 Open the localhost URL, then choose **Open folder**, **Open files**, or **Open ZIP**. Extensionless DICOM files are supported. Examinations are session-only; reopen them after reloading.
 
 ```sh
-npm run check           # Oxlint, unit tests, type checking, build, privacy guard
+npm run check           # Lint, formatting, unit tests, type checking, build, privacy guard
 npx playwright install chromium
 npm run test:e2e        # Production-bundle browser tests with synthetic DICOM
 VIEWER_DEV=1 npm run test:e2e # Same workflows against the development server
-npm run format         # Oxfmt
+npm run lint           # Oxlint for application code, tests, scripts, and configuration
+npm run lint:fix       # Apply safe lint fixes
+npm run format         # Apply Oxfmt to code and configuration
+npm run format:check   # Check formatting without writing files
 npm run build
 npm run preview
 ```
+
+Oxlint and Oxfmt use the checked-in `.oxlintrc.json` and `.oxfmtrc.json` settings.
+CI runs both through `npm run check`. CLI scripts may print status and errors;
+application code retains the `no-console` rule. Formatting skips reference docs
+and public assets, as well as ignored build outputs and local data.
 
 ## Viewing
 

@@ -7,6 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "preview:cloudflare": "wrangler dev --ip 127.0.0.1 --port 4173",
+    "predeploy": "node scripts/require-interactive-deploy.mjs",
+    "deploy": "npm run check && wrangler deploy",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check:privacy": "node scripts/check-privacy.mjs",
@@ -38,7 +41,8 @@
     "oxlint": "1.85.0",
     "typescript": "7.0.2",
     "vite": "8.3.0",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "wrangler": "4.147.0"
   },
   "overrides": {
     "adm-zip": "0.6.1",

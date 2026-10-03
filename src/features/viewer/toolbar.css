@@ -156,6 +156,7 @@
   z-index: 40;
   top: calc(100% + 5px);
   right: 0;
+  transform: translateX(var(--popover-shift, 0px));
   width: min(290px, calc(100vw - 24px));
   min-width: 240px;
   margin: 0;

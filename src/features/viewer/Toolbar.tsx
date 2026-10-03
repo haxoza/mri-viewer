@@ -7,6 +7,7 @@ import { getSetSiblings, togglePlay } from '../../imaging/rendering/controller';
 import { editMarks, useMarks, type MarkColor } from '../annotations/model';
 import { parseIndex } from '../../imaging/tools/navigation';
 import { volumeProblem } from '../../imaging/geometry';
+import { usePopoverPosition } from '../../app/usePopoverPosition';
 import './toolbar.css';
 
 function ToolbarPopover({
@@ -23,6 +24,7 @@ function ToolbarPopover({
   children: ReactNode;
 }) {
   const root = useRef<HTMLDetailsElement>(null);
+  const position = usePopoverPosition(root, '.toolbar-popover-content');
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) root.current.open = false;
@@ -34,6 +36,7 @@ function ToolbarPopover({
     <details
       ref={root}
       className={`toolbar-popover ${className}`}
+      onToggle={position}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && event.currentTarget.open) {
           event.preventDefault();
@@ -185,7 +188,7 @@ export function Toolbar({
             <select
               aria-label="Viewport mode"
               value={p.mode}
-              disabled={!hasImage || p.pending}
+              disabled={!set || p.pending}
               onChange={(e) =>
                 void viewerActions.assignView(active, p.setId!, e.target.value as 'stack' | Plane)
               }

@@ -27,6 +27,7 @@ coverage/
 playwright-report/
 test-results/
 .vite/
+.wrangler/
 .env
 .env.*
 !.env.example

@@ -58,4 +58,6 @@ Set `VIEWER_URL` if using another local port. The ZIP check creates a temporary 
 
 ## Hosting
 
+The public viewer is hosted at https://mri-viewer.haxoza.com using Cloudflare Workers Static Assets. See [deployment commands and authentication](docs/hosting.md#cloudflare-deployment).
+
 Deploy only `dist/` over HTTPS. Codecs, workers, and scripts are bundled at the same origin. See [hosting configuration](docs/hosting.md) for headers. Once the required application/codec assets have loaded, local viewing works with the network disabled. Offline reopening is not implemented; no service worker caches examination data.

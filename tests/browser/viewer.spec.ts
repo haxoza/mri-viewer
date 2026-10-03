@@ -73,7 +73,7 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.keyboard.press('End');
   await expect(page.getByLabel('Slice number')).toHaveValue('7');
   await expect(page.getByRole('button', { name: 'Next slice', exact: true })).toBeDisabled();
-  await page.getByLabel('Layout').selectOption('grid-4');
+  await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('grid-4');
   await expect(page.getByRole('region', { name: 'Pane 4', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'MPR', exact: true }).click();
   await expect(page.getByText('axial · reconstruction')).toBeVisible();
@@ -127,7 +127,7 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
     });
   });
   await page.getByRole('button', { name: 'Export', exact: true }).click();
-  await page.getByLabel(/^Capture/).selectOption('workspace');
+  await page.getByRole('combobox', { name: /^Capture/ }).selectOption('workspace');
   await page.getByLabel(/^Format/).selectOption('jpeg');
   await page.getByRole('button', { name: '2×', exact: true }).click();
   await refreshPreview(page);
@@ -231,7 +231,7 @@ test('MPR export preserves every pane when rendered again', async ({ page }) => 
   const positions = await page.locator('.pane-bottom').allTextContents();
   for (const scope of ['active', 'workspace']) {
     await page.getByRole('button', { name: 'Export', exact: true }).click();
-    await page.getByLabel(/^Capture/).selectOption(scope);
+    await page.getByRole('combobox', { name: /^Capture/ }).selectOption(scope);
     await page.getByRole('button', { name: '2×', exact: true }).click();
     await refreshPreview(page);
     const download = page.waitForEvent('download');
@@ -261,7 +261,8 @@ for (const mode of ['stack', 'MPR', 'single MPR']) {
       await page.getByRole('button', { name: 'MPR', exact: true }).click();
       await expect(page.getByText('coronal · reconstruction')).toBeVisible();
       await expect(page.locator('.pane-status')).toHaveCount(0);
-      if (mode === 'single MPR') await page.getByLabel('Layout').selectOption('single');
+      if (mode === 'single MPR')
+        await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('single');
     }
     const settle = async () => {
       await expect(page.locator('.pane-status')).toHaveCount(0);
@@ -411,7 +412,7 @@ test('linked panes follow position and retain assignment through layout changes'
     })),
   ]);
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
-  await page.getByLabel('Layout').selectOption('columns-2');
+  await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('columns-2');
   await page.getByLabel('Image pane 2.', { exact: false }).click();
   await page.getByRole('button', { name: 'Open Synthetic volume 2 Axial 1' }).click();
   await expect(page.getByLabel('Slice number')).toHaveValue('4');
@@ -420,8 +421,8 @@ test('linked panes follow position and retain assignment through layout changes'
   await page.getByRole('button', { name: 'Last slice', exact: true }).click();
   await expect(page.locator('.pane-bottom').nth(0)).toContainText('Slice 7 / 7');
   await expect(page.locator('.pane-bottom').nth(1)).toContainText('Slice 7 / 7');
-  await page.getByLabel('Layout').selectOption('single');
-  await page.getByLabel('Layout').selectOption('columns-2');
+  await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('single');
+  await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('columns-2');
   await expect(page.locator('.pane-bottom').nth(1)).toContainText('Slice 7 / 7');
   await page.getByLabel('Image pane 1.', { exact: false }).focus();
   await page.keyboard.press('Home');
@@ -443,7 +444,7 @@ test('Enhanced MR separates spatial and temporal controls', async ({ page }) => 
   await expect(page.getByLabel('Slice number')).toHaveValue('2');
   const sequence = page.locator('.series > .foldable-header .foldable-toggle');
   const stack = page.locator('button.stack').first();
-  await expect(stack).toHaveAttribute('title', 'Click to open stack');
+  await expect(stack).toHaveAttribute('title', 'Open stack in Pane 1');
   await expect(stack).toContainText('Axial · Stack 1');
   await sequence.click();
   await expect(stack).toBeHidden();
@@ -469,7 +470,10 @@ test('touch slice dragging cancels on pinch, and manual navigation pauses cine',
   await page.goto('/');
   await page.getByLabel('Open DICOM files').setInputFiles(files);
   await expect(page.locator('.pane-bottom')).toContainText('Slice 4 / 7');
-  await page.getByRole('button', { name: 'Close examinations' }).click();
+  await expect(page.getByRole('button', { name: 'Toggle examinations' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
   const canvas = page.getByLabel('Image pane 1.', { exact: false });
   const rect = (await canvas.boundingBox())!;
   const x = rect.x + rect.width / 2,

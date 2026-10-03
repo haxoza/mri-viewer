@@ -1,9 +1,10 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useSession, getSet } from '../../app/store';
 import { controllers } from '../../imaging/rendering/controller';
 import { removeStudy } from '../import/importer';
 import { volumeProblem } from '../../imaging/geometry';
-import type { Series } from '../../imaging/types';
+import type { DisplaySet, Series } from '../../imaging/types';
+import './study-browser.css';
 function Foldable({
   className,
   label,
@@ -45,19 +46,47 @@ function Foldable({
 function date(text: string) {
   return /^\d{8}$/.test(text)
     ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6)}`
-    : 'Unknown date';
+    : undefined;
 }
 function SequenceTitle({ series }: { series: Series }) {
+  const seriesDate = date(series.date);
   return (
     <span className="series-title">
       <span className="series-number">{series.number || '–'}</span>
       <span>
         <strong>{series.description}</strong>
         <small>
-          {series.sets.reduce((n, s) => n + s.frames.length, 0)} frames · {date(series.date)}
+          {series.sets.reduce((n, s) => n + s.frames.length, 0)} frames
+          {seriesDate && ` · ${seriesDate}`}
         </small>
         {series.sets.length === 1 && <small>{series.sets[0].orientation}</small>}
       </span>
+    </span>
+  );
+}
+function StackHint({
+  set,
+  active,
+  selected,
+}: {
+  set: DisplaySet;
+  active: number;
+  selected: boolean;
+}) {
+  const problem = useMemo(() => volumeProblem(set), [set]);
+  return (
+    <span className="series-hint">
+      <small className="series-destination">
+        {selected ? 'Selected · Pane' : 'Opens in Pane'} {active + 1}
+      </small>
+      {!problem && (
+        <span
+          className="series-mpr"
+          title="Geometry eligible for MPR. Reconstruction also depends on decoding and available memory."
+        >
+          MPR eligible
+        </span>
+      )}
     </span>
   );
 }
@@ -68,7 +97,7 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
   const selected = getSet(pane.setId);
   function openStack(id: string) {
     void controllers[active].assign(id);
-    if (matchMedia('(max-width: 1000px)').matches) useSession.setState({ sidebar: false });
+    if (matchMedia('(max-width: 1100px)').matches) useSession.setState({ sidebar: false });
   }
   return (
     <aside className="study-browser">
@@ -105,7 +134,8 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
                 <span className="study-title">
                   <strong>{study.description}</strong>
                   <small>
-                    {date(study.date)} · {study.series.length} series
+                    {date(study.date) && `${date(study.date)} · `}
+                    {study.series.length} series
                   </small>
                 </span>
               }
@@ -127,13 +157,16 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
                     key={series.uid}
                     className={`series series-set single-stack ${pane.setId === series.sets[0].id ? 'selected' : ''}`}
                     aria-label={`Open ${series.description} ${series.sets[0].orientation} 1`}
-                    title="Click to open stack"
+                    title={`Open stack in Pane ${active + 1}`}
+                    aria-pressed={pane.setId === series.sets[0].id}
                     onClick={() => openStack(series.sets[0].id)}
                   >
                     <SequenceTitle series={series} />
-                    <span className="arrow" aria-hidden="true">
-                      ↗
-                    </span>
+                    <StackHint
+                      set={series.sets[0]}
+                      active={active}
+                      selected={pane.setId === series.sets[0].id}
+                    />
                   </button>
                 ) : (
                   <Foldable
@@ -147,7 +180,8 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
                         key={set.id}
                         className={`series-set stack ${pane.setId === set.id ? 'selected' : ''}`}
                         aria-label={`Open ${series.description} ${set.orientation} ${i + 1}`}
-                        title="Click to open stack"
+                        title={`Open stack in Pane ${active + 1}`}
+                        aria-pressed={pane.setId === set.id}
                         onClick={() => openStack(set.id)}
                       >
                         <span>
@@ -158,9 +192,7 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
                             {set.frames[0].echo ? ` · Echo ${set.frames[0].echo}` : ''}
                           </small>
                         </span>
-                        <span className="arrow" aria-hidden="true">
-                          ↗
-                        </span>
+                        <StackHint set={set} active={active} selected={pane.setId === set.id} />
                       </button>
                     ))}
                   </Foldable>
@@ -171,16 +203,14 @@ export function StudyBrowser({ importing }: { importing: boolean }) {
         )}
       </div>
       <div className="selected-summary">
-        <span className="eyebrow">SELECTED · PANE {active + 1}</span>
-        <strong>{selected?.frames[0].seriesDescription ?? 'No series selected'}</strong>
+        <span className="summary-pane">
+          Pane {active + 1} · {selected ? selected.orientation : 'No series selected'}
+        </span>
         {selected && (
-          <>
-            <small>
-              {selected.orientation} · {selected.frames.length} slices ·{' '}
-              {selected.frames[0].columns} × {selected.frames[0].rows}
-            </small>
-            <small>{volumeProblem(selected) ?? 'Geometry eligible for MPR'}</small>
-          </>
+          <small>
+            {selected.frames.length} slices · {selected.frames[0].columns} ×{' '}
+            {selected.frames[0].rows}
+          </small>
         )}
       </div>
     </aside>

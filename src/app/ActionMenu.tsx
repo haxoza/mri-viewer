@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { usePopoverPosition } from './usePopoverPosition';
 
 export function ActionMenu({
   label,
@@ -11,6 +12,7 @@ export function ActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  usePopoverPosition(root, '.action-menu-list', open);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const id = useId();

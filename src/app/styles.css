@@ -1254,6 +1254,7 @@ dialog:has(.capture-preview) {
   position: absolute;
   top: calc(100% + 5px);
   right: 0;
+  transform: translateX(var(--popover-shift, 0px));
   z-index: 40;
   width: min(290px, 90vw);
   padding: 5px;

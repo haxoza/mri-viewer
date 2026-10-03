@@ -332,15 +332,12 @@ test('reconstruction failures report unsupported geometry and memory; acquired v
   });
   expect(result.ok).toBe(false);
   expect(result.error).toContain('memory profile');
-  expect(
-    (
-      await call(page, 'assign_view', {
-        pane: 2,
-        displaySet: catalog[1].displaySets[0].id,
-        mode: 'acquired',
-      })
-    ).ok,
-  ).toBe(true);
+  await page.getByLabel('Image pane 2.', { exact: false }).click();
+  const view = page.getByLabel('Viewport mode');
+  await expect(view).toBeEnabled();
+  await view.selectOption('stack');
+  await expect(page.locator('.pane-bottom').nth(1)).toContainText('Slice 4 / 7');
+  await expect(page.locator('.pane-status')).toHaveCount(0);
 });
 
 test.describe('high-DPI capture', () => {

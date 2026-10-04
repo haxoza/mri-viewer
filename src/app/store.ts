@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Frame, Plane, Profile, Study } from '../imaging/types';
+import type { Frame, Plane, Profile, Study, Vec3 } from '../imaging/types';
 import { allSets, buildCatalog } from '../imaging/catalog';
 export type Tool = 'slices' | 'pan' | 'zoom' | 'window' | 'crosshair' | 'ellipse';
 export type Layout =
@@ -58,6 +58,8 @@ interface Session {
   tool: Tool;
   profile: Profile;
   sidebar: boolean;
+  nativeLinks: boolean;
+  nativePoint?: { setId: string; point: Vec3 };
   sensitivity: number;
   notice?: string;
   patch: (index: number, patch: Partial<Pane>) => void;
@@ -72,6 +74,7 @@ export const useSession = create<Session>((set) => ({
   tool: 'slices',
   profile: matchMedia('(pointer: coarse)').matches ? 'low' : 'standard',
   sidebar: true,
+  nativeLinks: false,
   sensitivity: 60,
   patch: (index, patch) =>
     set((s) => ({ panes: s.panes.map((p, i) => (i === index ? { ...p, ...patch } : p)) })),

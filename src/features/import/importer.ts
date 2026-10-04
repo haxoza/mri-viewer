@@ -129,6 +129,8 @@ export async function removeStudy(uid: string) {
   for (const [i, p] of state.panes.entries())
     if (p.setId && sets.has(p.setId)) controllers[i].clear();
   for (const id of sets) crosshairs.delete(id);
+  if (state.nativePoint && sets.has(state.nativePoint.setId))
+    useSession.setState({ nativePoint: undefined });
   forgetFrames(outgoing);
   await sources.remove([...new Set(outgoing.map((f) => f.sourceId))]);
   state.updateCatalog(state.frames.filter((f) => f.studyUID !== uid));

@@ -3,7 +3,7 @@ import { ActionMenu } from '../../app/ActionMenu';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Plane } from '../../imaging/types';
 import { getSet, paneCount, useSession, type Layout, type Tool } from '../../app/store';
-import { getSetSiblings, togglePlay } from '../../imaging/rendering/controller';
+import { getSetSiblings, togglePlay, setNativeLinks } from '../../imaging/rendering/controller';
 import { editMarks, useMarks, type MarkColor } from '../annotations/model';
 import { parseIndex } from '../../imaging/tools/navigation';
 import { volumeProblem } from '../../imaging/geometry';
@@ -78,6 +78,7 @@ export function Toolbar({
     p = useSession((s) => s.panes[s.active]),
     tool = useSession((s) => s.tool),
     layout = useSession((s) => s.layout);
+  const nativeLinks = useSession((s) => s.nativeLinks);
   const color = useMarks((s) => s.color);
   const hasMarks = useMarks((s) => s.panes[active].length > 0);
   const canUndoMarks = useMarks((s) => s.history[active].length > 0);
@@ -94,8 +95,8 @@ export function Toolbar({
       : mprProblem;
   const crosshairDisabledReason = !hasImage
     ? 'Select a series to use the crosshair.'
-    : p.mode === 'stack'
-      ? 'Available in MPR views.'
+    : p.mode === 'stack' && !(nativeLinks && p.linked)
+      ? 'Enable Native links and link this pane, or use MPR.'
       : undefined;
   const [input, setInput] = useState('');
   const [invalid, setInvalid] = useState(false);
@@ -182,6 +183,13 @@ export function Toolbar({
             onClick={() => void viewerActions.openMpr()}
           >
             MPR
+          </button>
+          <button
+            aria-pressed={nativeLinks}
+            onClick={() => setNativeLinks(!nativeLinks)}
+            title="Experimental patient-space linking of acquired stacks; use each pane's Link button"
+          >
+            Native links
           </button>
           <label className="inline-label toolbar-view">
             View
@@ -286,6 +294,14 @@ export function Toolbar({
           </button>
         </fieldset>
       </div>
+      {nativeLinks && (
+        <div className="native-link-notice">
+          Native links · experiment. Link each stack, then click with Crosshair. Scrolling moves the
+          shared point onto the selected slice. Unlink for independent navigation. Coordinates do
+          not verify anatomical alignment after motion. No registration or fusion; not for
+          diagnosis.
+        </div>
+      )}
       <div className="navigation viewer-navigation" aria-label="Slice navigation and cine">
         <span className="active-caption">
           Pane {active + 1} · {p.mode === 'stack' ? 'Slice' : 'Plane position'}

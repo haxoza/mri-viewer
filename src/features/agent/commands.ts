@@ -5,7 +5,15 @@ import { VolumeViewport } from '@cornerstonejs/core';
 import { getSet, paneCount, useSession, type Layout } from '../../app/store';
 import { revision, interactionCancellation, settle } from '../../app/settlement';
 import { panView, windowView, zoomView } from '../../app/viewActions';
-import { controllers, pause, cancelMpr } from '../../imaging/rendering/controller';
+import { controllers, pause, cancelMpr, setNativeLinks } from '../../imaging/rendering/controller';
+import {
+  nativeGeometryProblem,
+  insideNativeImage,
+  nearestNative,
+  planeOffset,
+  nativeCompatibility,
+  nativeReference,
+} from '../../imaging/nativeGeometry';
 import { volumeProblem } from '../../imaging/geometry';
 import { allSets } from '../../imaging/catalog';
 import { editMarks, useMarks, type Ellipse } from '../annotations/model';
@@ -40,6 +48,7 @@ export interface CommandArguments {
     operation?: 'fit' | 'reset';
   };
   set_linked: { pane: number; linked: boolean };
+  set_native_links: { enabled: boolean };
   open_mpr: { pane: number };
   set_crosshair: { pane: number; x: number; y: number };
   edit_annotations: {
@@ -89,6 +98,7 @@ export const schemas: Record<CommandName, Schema> = {
     ['pane'],
   ),
   set_linked: object({ pane, linked: { type: 'boolean' } }),
+  set_native_links: object({ enabled: { type: 'boolean' } }),
   open_mpr: object({ pane }),
   set_crosshair: object({ pane, x: number(0, 1), y: number(0, 1) }),
   edit_annotations: object(
@@ -148,6 +158,7 @@ export function viewerState() {
   return {
     revision,
     layout: s.layout,
+    nativeLinks: s.nativeLinks,
     activePane: s.active + 1,
     screenshot: screenshot
       ? {
@@ -172,6 +183,7 @@ export function viewerState() {
         pending: p.pending,
         failed: !!p.error,
         linked: p.linked,
+        nativeLink: nativeLinkState(i),
         playing: p.playing,
         zoom: v?.getZoom(),
         pan: v?.getPan(),
@@ -194,9 +206,56 @@ export function viewerState() {
           columns: set.frames[0].columns,
           count: set.frames.length,
           reconstruction: !volumeProblem(set),
+          nativeLinkable: !nativeGeometryProblem(set) && !nativeCompatibility(set, set),
         })),
       })),
     })),
+  };
+}
+function nativeLinkState(index: number) {
+  const s = useSession.getState(),
+    p = s.panes[index],
+    set = getSet(p.setId);
+  if (!s.nativeLinks || !p.linked || p.mode !== 'stack' || !set) return null;
+  const shared = s.nativePoint,
+    source = getSet(shared?.setId);
+  if (!shared || !source) return { status: 'awaiting-point' };
+  const match = nearestNative(source, set, shared.point);
+  if (match.reason) return { status: 'incompatible', reason: match.reason };
+  if (p.pending || p.error || p.displayed < 0) return { status: 'not-ready' };
+  const frame = set.frames[p.displayed];
+  return {
+    status: 'linked',
+    nearestSlice: match.index! + 1,
+    offsetMm: Math.abs(planeOffset(frame, shared.point)),
+    outsideCoverage: match.outside || !insideNativeImage(frame, shared.point),
+    references: s.panes
+      .slice(0, paneCount(s.layout))
+      .flatMap<{ pane: number; relation: string; reason?: string; separationMm?: number }>(
+        (other, i) => {
+          if (
+            i === index ||
+            !other.linked ||
+            other.mode !== 'stack' ||
+            other.pending ||
+            other.error ||
+            other.displayed < 0
+          )
+            return [];
+          const target = getSet(other.setId);
+          if (!target) return [];
+          const reason = nativeCompatibility(set, target);
+          if (reason) return [{ pane: i + 1, relation: 'incompatible', reason }];
+          const reference = nativeReference(frame, target.frames[other.displayed]);
+          return [
+            {
+              pane: i + 1,
+              relation: reference.relation,
+              ...('separationMm' in reference ? { separationMm: reference.separationMm } : {}),
+            },
+          ];
+        },
+      ),
   };
 }
 function visiblePane(pane: number, loaded = true) {
@@ -247,6 +306,8 @@ export function executeCommand<N extends CommandName>(
       if (name === 'set_layout') {
         closeScreenshot();
         viewerActions.setLayout((input as CommandArguments['set_layout']).layout);
+      } else if (name === 'set_native_links') {
+        setNativeLinks((input as CommandArguments['set_native_links']).enabled);
       } else if (name === 'close_capture') {
         closeScreenshot();
         closeCapture();
@@ -353,10 +414,28 @@ export function executeCommand<N extends CommandName>(
             break;
           }
           case 'set_crosshair': {
-            if (!(c.viewport instanceof VolumeViewport))
-              throw new ViewerError('Crosshair requires a reconstructed pane.');
+            // A manual/cine navigation may predate this serialized tool call.
+            // Apply the point only after the displayed image is ready.
+            await settle(signal);
+            if (
+              !(c.viewport instanceof VolumeViewport) &&
+              !(useSession.getState().nativeLinks && useSession.getState().panes[index].linked)
+            )
+              throw new ViewerError(
+                'Crosshair requires MPR or a linked native stack with Native links enabled.',
+              );
             const a = input as CommandArguments['set_crosshair'],
               r = c.element!.getBoundingClientRect();
+            if (!(c.viewport instanceof VolumeViewport)) {
+              const pane = useSession.getState().panes[index],
+                set = getSet(pane.setId);
+              if (!set) throw new ViewerError('Native stack unavailable.');
+              const problem = nativeGeometryProblem(set);
+              if (problem) throw new ViewerError(problem);
+              const point = c.viewport!.canvasToWorld([a.x * r.width, a.y * r.height]);
+              if (!insideNativeImage(set.frames[pane.displayed], point))
+                throw new ViewerError('Choose a point inside the acquired image.');
+            }
             viewerActions.setCrosshair(index, a.x * r.width, a.y * r.height);
             break;
           }

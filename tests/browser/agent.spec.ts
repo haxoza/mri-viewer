@@ -77,7 +77,7 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   page,
 }) => {
   await setup(page);
-  expect(await page.evaluate(() => (document as any).modelContext.tools.size)).toBe(12);
+  expect(await page.evaluate(() => (document as any).modelContext.tools.size)).toBe(13);
   const initial = await call(page, 'get_viewer_state');
   expect(initial.ok).toBe(true);
   const serialized = JSON.stringify(initial);
@@ -168,7 +168,7 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   await page.getByLabel('Disable agent tools').click();
   await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(0);
   await page.getByLabel('Enable agent tools').click();
-  await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(12);
+  await expect.poll(() => page.evaluate(() => (document as any).modelContext.tools.size)).toBe(13);
 });
 
 test('serialized commands settle linked panes and MPR; workspace excludes hidden panes', async ({
@@ -574,4 +574,104 @@ test('slow frozen export encoding is cancelled without replacing the existing pr
   expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(false);
   await page.getByRole('button', { name: 'Close dialog' }).click();
   expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(true);
+});
+
+test('WebMCP configures native links and describes coincident references without exposing coordinates', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.getByLabel('Open DICOM files').setInputFiles([
+    ...Array.from({ length: 7 }, (_, i) => ({
+      name: `native-b-${i}`,
+      mimeType: 'application/dicom',
+      buffer: Buffer.from(dicom(i, { series: 2, plane: 'sagittal' })),
+    })),
+    ...Array.from({ length: 7 }, (_, i) => ({
+      name: `native-c-${i}`,
+      mimeType: 'application/dicom',
+      buffer: Buffer.from(dicom(i, { series: 3 })),
+    })),
+  ]);
+  await expect(page.getByText('14 frames imported')).toBeVisible();
+  const sets = (await call(page, 'get_viewer_state')).result.studies.flatMap((s: any) =>
+    s.series.flatMap((r: any) => r.displaySets),
+  );
+  expect(sets).toHaveLength(3);
+  expect(sets.every((s: any) => s.nativeLinkable)).toBe(true);
+  expect((await call(page, 'set_native_links', { enabled: 'true' })).ok).toBe(false);
+  expect((await call(page, 'set_native_links', { enabled: true, pane: 1 })).ok).toBe(false);
+  expect((await call(page, 'set_layout', { layout: 'left-3' })).ok).toBe(true);
+  for (let i = 0; i < 3; i++) {
+    expect(
+      (await call(page, 'assign_view', { pane: i + 1, displaySet: sets[i].id, mode: 'acquired' }))
+        .ok,
+    ).toBe(true);
+  }
+  expect((await call(page, 'set_native_links', { enabled: true })).ok).toBe(true);
+  for (const pane of [1, 2, 3])
+    expect((await call(page, 'set_linked', { pane, linked: true })).ok).toBe(true);
+  const selected = await call(page, 'set_crosshair', { pane: 1, x: 0.5, y: 0.5 });
+  expect(selected.ok).toBe(true);
+  const state = (await call(page, 'get_viewer_state')).result;
+  expect(state.nativeLinks).toBe(true);
+  expect(state.panes[0].nativeLink.references).toContainEqual({
+    pane: 3,
+    relation: 'coincident',
+    separationMm: 0,
+  });
+  expect(state.panes[1].nativeLink.references.map((r: any) => r.relation)).toEqual([
+    'intersecting',
+    'intersecting',
+  ]);
+  const region = (i: number) => page.getByRole('region', { name: `Pane ${i}`, exact: true });
+  await expect(region(1).getByText('Pane 3: same plane (within 0.01 mm)')).toBeVisible();
+  await expect(region(3).getByText('Pane 1: same plane (within 0.01 mm)')).toBeVisible();
+  await expect(region(2).locator('.native-crosshair line')).toHaveCount(2);
+  const labels = region(2).locator('.native-crosshair text');
+  await expect(labels).toHaveText(['Pane 1', 'Pane 3']);
+  expect(await labels.nth(0).getAttribute('y')).not.toBe(await labels.nth(1).getAttribute('y'));
+  expect(JSON.stringify(state)).not.toMatch(
+    /Synthetic|Patient|studyUID|seriesUID|sopUID|frameOfReference|nativePoint|segment/,
+  );
+  expect((await call(page, 'set_crosshair', { pane: 2, x: 0.5, y: 0.5 })).ok).toBe(true);
+  expect((await call(page, 'set_slice', { pane: 1, position: 2 })).ok).toBe(true);
+  const moved = (await call(page, 'get_viewer_state')).result;
+  expect(moved.panes[2].displayed).toBe(2);
+  expect(moved.panes[0].nativeLink.offsetMm).toBeCloseTo(0);
+  expect((await call(page, 'set_native_links', { enabled: true })).ok).toBe(true);
+  const repeated = (await call(page, 'get_viewer_state')).result;
+  expect(repeated.panes.map((p: any) => [p.displayed, p.nativeLink])).toEqual(
+    moved.panes.map((p: any) => [p.displayed, p.nativeLink]),
+  );
+  expect((await call(page, 'set_native_links', { enabled: false })).ok).toBe(true);
+  const disabled = (await call(page, 'get_viewer_state')).result;
+  expect(disabled.nativeLinks).toBe(false);
+  expect(disabled.panes.every((p: any) => p.nativeLink === null)).toBe(true);
+  await expect(page.locator('.native-crosshair')).toHaveCount(0);
+});
+
+test('native crosshair commands wait for a pre-existing pending slice navigation', async ({
+  page,
+}) => {
+  await setup(page);
+  expect((await call(page, 'set_native_links', { enabled: true })).ok).toBe(true);
+  expect((await call(page, 'set_linked', { pane: 1, linked: true })).ok).toBe(true);
+  expect((await call(page, 'set_crosshair', { pane: 1, x: 0.5, y: 0.5 })).ok).toBe(true);
+  const image = page.getByLabel('Image pane 1.', { exact: false });
+  const box = (await image.boundingBox())!;
+  const result = await page.evaluate(async () => {
+    // Navigation becomes pending synchronously; the tool starts before decoding settles.
+    // No human interaction occurs after the tool begins.
+    document
+      .querySelector('.imaging-canvas')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    return (document as any).modelContext.tools
+      .get('set_crosshair')
+      .execute({ pane: 1, x: 0.4, y: 0.5 }, { signal: new AbortController().signal });
+  });
+  expect(result.ok).toBe(true);
+  expect(result.result.panes[0].displayed).toBe(7);
+  await expect
+    .poll(async () => Number(await page.locator('.native-crosshair circle').getAttribute('cx')))
+    .toBeCloseTo(box.width * 0.4, 1);
 });

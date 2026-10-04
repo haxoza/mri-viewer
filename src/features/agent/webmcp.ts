@@ -19,7 +19,7 @@ export function modelContext(): ModelContext | undefined {
 }
 const descriptions: Record<CommandName, string> = {
   get_viewer_state:
-    'Read the session catalog and visible pane state. Aliases are session-only; positions and panes are one-based. No patient metadata is returned.',
+    'Read the session catalog and visible pane state. Aliases are session-only; positions and panes are one-based. Native-link diagnostics include offsets, coverage and plane relationships; coincident references can overlap. No identifiers or patient-space coordinates are returned.',
   set_layout: 'Choose a supported workspace layout. Hidden panes are unavailable to tools.',
   set_active_pane: 'Select a visible pane numbered 1–4.',
   assign_view:
@@ -28,10 +28,14 @@ const descriptions: Record<CommandName, string> = {
     'Navigate to an absolute one-based slice or reconstructed-plane position; wait for linked panes.',
   set_view:
     'Apply window width/center, absolute zoom (0.05–30), pan delta dx/dy in CSS pixels, fit or reset.',
-  set_linked: 'Enable or disable existing positional linking on a visible pane.',
+  set_linked:
+    'Include or exclude a visible pane from linking. Native links uses patient-space points; otherwise only parallel stacks link.',
+  set_native_links:
+    'Enable or disable linked native stacks for this session. Assign acquired views, enable this mode, set_linked for each pane, then set_crosshair to select a shared point. Disabling restores parallel-stack linking. No registration or fusion.',
   open_mpr:
     'Open the selected pane as three reconstructed planes. May fail if geometry or memory is insufficient.',
-  set_crosshair: 'Move the shared MPR crosshair at normalized pane coordinates x/y (0–1).',
+  set_crosshair:
+    'Move the shared crosshair in MPR or an enabled, linked native stack at normalized pane coordinates x/y (0–1).',
   edit_annotations:
     'Edit colored ellipses in normalized pane coordinates. These are fixed screen marks, without anatomical tracking or measurements. Undo or clear marks in one pane.',
   capture_view:

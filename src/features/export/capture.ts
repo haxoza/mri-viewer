@@ -55,10 +55,13 @@ export function viewSignature() {
   const s = useSession.getState();
   return JSON.stringify({
     layout: s.layout,
+    nativeLinks: s.nativeLinks,
+    nativePoint: s.nativePoint,
     active: s.active,
     marks: useMarks.getState().panes,
     panes: s.panes.map((p, i) => ({
       set: p.setId,
+      linked: p.linked,
       mode: p.mode,
       requested: p.requested,
       displayed: p.displayed,

@@ -35,7 +35,12 @@ export function frame(index: number, overrides: Partial<Frame> = {}): Frame {
 // Synthetic Part 10 data generated in code: no patient data or binary fixtures in Git.
 export function dicom(
   index: number,
-  options: { signed?: boolean; inverted?: boolean; series?: number } = {},
+  options: {
+    signed?: boolean;
+    inverted?: boolean;
+    series?: number;
+    plane?: 'axial' | 'sagittal' | 'coronal';
+  } = {},
 ) {
   const chunks: Uint8Array[] = [];
   const encoder = new TextEncoder();
@@ -70,8 +75,13 @@ export function dicom(
   element(0x20, 0x0e, 'UI', `1.2.3.${options.series ?? 1}`);
   element(0x20, 0x11, 'IS', String(options.series ?? 1));
   element(0x20, 0x13, 'IS', String(index + 1));
-  element(0x20, 0x32, 'DS', `0\\0\\${index * 2}`);
-  element(0x20, 0x37, 'DS', '1\\0\\0\\0\\1\\0');
+  const geometry = {
+    axial: { position: [0, 0, index * 2], orientation: [1, 0, 0, 0, 1, 0] },
+    sagittal: { position: [index * 2, 0, 0], orientation: [0, 1, 0, 0, 0, 1] },
+    coronal: { position: [0, index * 2, 0], orientation: [1, 0, 0, 0, 0, -1] },
+  }[options.plane ?? 'axial'];
+  element(0x20, 0x32, 'DS', geometry.position.join('\\'));
+  element(0x20, 0x37, 'DS', geometry.orientation.join('\\'));
   element(0x20, 0x52, 'UI', '1.2.3.99');
   element(0x28, 2, 'US', 1);
   element(0x28, 4, 'CS', options.inverted ? 'MONOCHROME1' : 'MONOCHROME2');

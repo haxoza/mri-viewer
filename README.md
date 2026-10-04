@@ -37,7 +37,7 @@ and public assets, as well as ignored build outputs and local data.
 - Use wheel, slider, exact slice number, or one-finger dragging in **Slices** mode. With the image focused: Up/Down, Page Up/Page Down, Home/End, and Space. Navigation stops at stack boundaries.
 - Choose **Pan**, **Zoom**, or **Window** for dragging; pinch zoom and two-finger pan are available on touch devices. Fit/reset preserve position.
 - Compare up to four panes, resize the main split, and enable **Link** on compatible panes to follow patient-space positions. Windows and zoom remain independent.
-- **MPR** opens axial, sagittal, and coronal reconstructions sharing one admitted volume. The viewport mode selector also assigns individual reconstructed planes. **Crosshair** moves the other planes to the selected point.
+- **MPR** opens axial, sagittal, and coronal reconstructions sharing one admitted volume. The plane closest to the acquisition orientation opens in the large, active pane; the other two open as smaller previews. For oblique acquisitions this is the closest anatomical plane, not an exact native slice. The viewport mode selector also assigns individual reconstructed planes. **Crosshair** moves the other planes to the selected point.
 - Cine supports speed, reverse, loop, bounce, and time playback at a fixed spatial position. Manual navigation pauses playback. Supplied frame timing is used at the default speed; changing speed scales it.
 - **Metadata** inspects a chosen source instance/frame, including nested sequences and private tags. The series summary identifies common versus varying fields.
 - **Ellipse** draws red/yellow/cyan screen marks, with undo and clear. Marks stay fixed during navigation; they do not track anatomy.

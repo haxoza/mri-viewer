@@ -1,4 +1,4 @@
-import type { DisplaySet, Frame, Vec3 } from './types';
+import type { DisplaySet, Frame, Plane, Vec3 } from './types';
 export const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i], 0);
 export const cross = (a: number[], b: number[]): Vec3 => [
   a[1] * b[2] - a[2] * b[1],
@@ -21,6 +21,20 @@ export function orientationName(n?: Vec3) {
   const a = n.map(Math.abs);
   const i = a.indexOf(Math.max(...a));
   return a[i] < 0.99 ? 'Oblique' : ['Sagittal', 'Coronal', 'Axial'][i];
+}
+export function mprPlaneOrder(normal: Vec3): Plane[] {
+  const planes: Plane[] = ['axial', 'sagittal', 'coronal'];
+  // Prefer the anatomical plane closest to the acquired slices, including
+  // oblique acquisitions. The sign of the slice direction does not matter.
+  const alignment = {
+    axial: Math.abs(normal[2]),
+    sagittal: Math.abs(normal[0]),
+    coronal: Math.abs(normal[1]),
+  };
+  const primary = planes.reduce((best, plane) =>
+    alignment[plane] > alignment[best] ? plane : best,
+  );
+  return [primary, ...planes.filter((plane) => plane !== primary)];
 }
 export function direction(v: number[]) {
   return v

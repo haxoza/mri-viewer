@@ -22,6 +22,40 @@ interface Saved {
   properties?: ReturnType<StackViewport['getProperties']>;
 }
 let engine: RenderingEngine | undefined;
+let resizeFrame: number | undefined;
+function scheduleResize() {
+  if (resizeFrame !== undefined) return;
+  // Cornerstone skips resize camera updates when a render is already queued.
+  // Let that render finish before resizing, and coalesce all pane observers.
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = undefined;
+    const cameras = controllers.flatMap((controller) => {
+      const viewport = controller.viewport;
+      const pane = useSession.getState().panes[controller.index];
+      return viewport instanceof VolumeViewport &&
+        pane.displayed >= 0 &&
+        !pane.error &&
+        viewport.getDefaultActor()
+        ? [{ viewport, camera: viewport.getCamera() }]
+        : [];
+    });
+    // Preserve the camera: it also contains the reconstructed slice position.
+    engine?.resize(true, true);
+    // Navigation can queue another render after the preceding frame finishes.
+    // Refresh the fitted reference even when Cornerstone skips that resize,
+    // then restore the exact camera so pixels and slice positions stay fixed.
+    for (const { viewport, camera } of cameras) {
+      viewport.resetCamera({
+        resetRotation: false,
+        resetOrientation: false,
+        resetAspectRatio: false,
+        suppressEvents: true,
+      });
+      viewport.setCamera(camera);
+    }
+    engine?.render();
+  });
+}
 export const crosshairs = new Map<string, Vec3>();
 const patch = (i: number, p: Parameters<ReturnType<typeof useSession.getState>['patch']>[1]) =>
   useSession.getState().patch(i, p);
@@ -41,12 +75,7 @@ export class ViewportController {
     await initialize(useSession.getState().profile);
     if (this.element !== element) return;
     engine ??= new RenderingEngine('local-viewer');
-    this.observer = new ResizeObserver(() => {
-      // MPR slice position is part of the camera. Resetting it here changes
-      // the rendered slice while leaving requested/displayed indices unchanged.
-      engine?.resize(true, true);
-      engine?.render();
-    });
+    this.observer = new ResizeObserver(scheduleResize);
     this.observer.observe(element);
     element.addEventListener(Enums.Events.IMAGE_RENDERED, this.onRender);
     const p = useSession.getState().panes[this.index];

@@ -1,0 +1,138 @@
+.study-browser .eyebrow {
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.study-browser h2 {
+  font-size: 16px;
+}
+
+.study-browser .study {
+  padding-top: 8px;
+}
+
+.study-browser .study-title strong {
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.study-browser .study-title small,
+.study-browser .series-title small,
+.study-browser .series-set small,
+.study-browser .selected-summary small,
+.study-browser .sidebar-empty small {
+  font-size: 11px;
+  color: #aab8c4;
+}
+
+.study-browser .foldable-header {
+  align-items: flex-start;
+}
+
+.study-browser .foldable-toggle {
+  align-items: flex-start;
+  padding: 8px 6px;
+  min-height: var(--control-h, 36px);
+}
+
+.study-browser .foldable-chevron {
+  line-height: 19px;
+  font-size: 13px;
+}
+
+.study-browser .study-remove {
+  min-height: var(--control-h, 36px);
+}
+
+.study-browser .series-title {
+  min-width: 0;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.study-browser .series-title > span:last-child {
+  min-width: 0;
+}
+
+.study-browser .series-title strong {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.study-browser .series-number {
+  min-width: 24px;
+  text-align: center;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 5px;
+  color: #bac8d2;
+}
+
+.study-browser .series-set {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px;
+  border: 2px solid #34414e;
+  background: #17212b;
+  color: #dce5ed;
+  min-height: var(--control-h, 36px);
+}
+
+.study-browser .series-set.selected {
+  border-color: #93bcb0;
+  box-shadow: inset 3px 0 0 #d3e5df;
+  background: #24362f;
+  color: #e5f2ec;
+}
+
+.study-browser .series-set.selected .series-title strong,
+.study-browser .series-set.selected > span:first-child {
+  font-weight: 650;
+}
+
+.study-browser .series-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.study-browser .series-hint .series-destination {
+  margin: 0;
+  font-size: 11px;
+  color: #b8c7d1;
+}
+
+.study-browser .series-set.selected .series-destination {
+  font-weight: 650;
+  color: #dcebe5;
+}
+
+.study-browser .series-mpr {
+  padding: 2px 5px;
+  border: 1px solid #64737f;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 15px;
+  color: #cdd8df;
+  background: #172129;
+}
+
+.study-browser .selected-summary {
+  padding: 10px 16px;
+}
+
+.study-browser .summary-pane {
+  font-size: 12px;
+  color: #dce5ed;
+}
+
+.study-browser .selected-summary small {
+  margin-top: 3px;
+}

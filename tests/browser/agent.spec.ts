@@ -119,7 +119,7 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   );
   expect((await call(page, 'get_viewer_state')).result.screenshot.changed).toBe(false);
   await call(page, 'close_capture');
-  // Frozen downloads remain a separate, unchanged contract.
+  // Viewer-only changes leave the export preview frozen until output settings change.
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await expect(page.locator('.capture-preview img')).toBeVisible();
   const url = await page.locator('.capture-preview img').getAttribute('src');
@@ -133,13 +133,34 @@ test('tool catalog, validation, one-based navigation, annotations, frozen captur
   await expect(page.locator('.capture-preview figcaption')).toContainText('acquired 2/7');
   expect((await call(page, 'get_viewer_state')).result.panes[0].annotations).toEqual([mark]);
   await expect(page.getByText('Viewer changed – this preview is unchanged.')).toBeVisible();
+  expect(
+    await page.evaluate(
+      async (url) =>
+        Array.from(new Uint8Array(await (window as any).__captureBlobs.get(url).arrayBuffer())),
+      url,
+    ),
+  ).toEqual(frozenBytes);
   expect((await call(page, 'capture_view')).ok).toBe(false);
   await page.getByLabel('Export width').fill('500');
-  await expect(page.getByText('Output settings changed', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled({
+    timeout: 65000,
+  });
+  await expect(page.locator('.capture-preview img')).not.toHaveAttribute('src', url!);
+  await expect(page.locator('.capture-preview img')).toHaveJSProperty('naturalWidth', 500);
+  await expect(page.locator('.capture-preview figcaption')).toContainText('acquired 6/7');
+  await expect(page.getByText('Viewer changed – this preview is unchanged.')).toHaveCount(0);
+  const updatedUrl = await page.locator('.capture-preview img').getAttribute('src');
+  const updatedBytes = await page.evaluate(
+    async (url) =>
+      Array.from(new Uint8Array(await (window as any).__captureBlobs.get(url).arrayBuffer())),
+    updatedUrl,
+  );
+  expect(updatedBytes).not.toEqual(frozenBytes);
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download image' }).click();
-  expect(Array.from(await readFile((await (await download).path())!))).toEqual(frozenBytes);
+  expect(Array.from(await readFile((await (await download).path())!))).toEqual(updatedBytes);
   expect(await page.evaluate((url) => (window as any).__revoked.has(url), url)).toBe(true);
+  expect(await page.evaluate((url) => (window as any).__revoked.has(url), updatedUrl)).toBe(true);
   expect((await call(page, 'edit_annotations', { pane: 1, action: 'clear' })).ok).toBe(true);
   expect((await call(page, 'edit_annotations', { pane: 1, action: 'undo' })).ok).toBe(true);
   expect((await call(page, 'get_viewer_state')).result.panes[0].annotations).toEqual([mark]);
@@ -540,14 +561,15 @@ test('slow frozen export encoding is cancelled without replacing the existing pr
       HTMLCanvasElement.prototype.toBlob = original;
     };
   });
-  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  await page.getByRole('button', { name: '2×', exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => typeof (window as any).__finishEncoding))
     .toBe('function');
-  // A new view supersedes the pending frozen capture; its old image remains downloadable.
+  // A new view supersedes the pending capture; stale output cannot be downloaded.
   expect((await call(page, 'set_slice', { pane: 1, position: 2 })).ok).toBe(true);
   await page.evaluate(() => (window as any).__finishEncoding());
   await expect(page.getByRole('alert')).toContainText('superseded');
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeDisabled();
   await expect(preview).toHaveAttribute('src', originalUrl!);
   expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(false);
   await page.getByRole('button', { name: 'Close dialog' }).click();

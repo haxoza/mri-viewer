@@ -44,8 +44,12 @@ export async function settle(signal: AbortSignal) {
       return;
   }
 }
-export function interactionCancellation(controller: AbortController) {
+export function interactionCancellation(
+  controller: AbortController,
+  ignoreInteractionsWithin?: HTMLElement,
+) {
   const cancel = (event: Event) => {
+    if (event.target instanceof Node && ignoreInteractionsWithin?.contains(event.target)) return;
     if (event.type === 'pointermove' && !(event as PointerEvent).buttons) return;
     controller.abort(new ViewerError('Operation superseded by human interaction.'));
   };

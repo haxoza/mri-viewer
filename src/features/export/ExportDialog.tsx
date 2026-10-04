@@ -1,5 +1,5 @@
 import { useMarks } from '../annotations/model';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog } from '../../app/Dialog';
 import { useSession } from '../../app/store';
 import { controllers } from '../../imaging/rendering/controller';
@@ -20,8 +20,51 @@ export function ExportDialog({
   );
   const active = controllers[options.pane ?? useSession.getState().active].element;
   const [locked, setLocked] = useState(true);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{
+    options: ExportOptions;
+    attempt: number;
+    error: string;
+  }>();
+  const [attempt, setAttempt] = useState(0);
+  const previewRef = useRef<HTMLElement>(null);
+  const settingsChanged = JSON.stringify(options) !== JSON.stringify(capture?.options);
+  // Tie completion to this edit so an older render cannot enable a stale download.
+  const finished = result?.options === options && result.attempt === attempt;
+  const error = finished ? result.error : '';
+  const busy = (settingsChanged || attempt > 0) && !finished;
+  useEffect(() => {
+    if (
+      !attempt &&
+      JSON.stringify(options) === JSON.stringify(useCapture.getState().capture?.options)
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    // Coalesce typing and slider changes; cleanup cancels superseded captures.
+    const timer = setTimeout(() => {
+      void createCapture(
+        options,
+        workspace,
+        controller.signal,
+        previewRef.current?.closest('dialog') ?? undefined,
+      )
+        .then(() => {
+          if (!controller.signal.aborted) setResult({ options, attempt, error: '' });
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted)
+            setResult({
+              options,
+              attempt,
+              error: error instanceof Error ? error.message : 'Export failed. Try a smaller size.',
+            });
+        });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [options, workspace, attempt]);
   const ratio = () => {
     const r =
       options.scope === 'active'
@@ -31,15 +74,13 @@ export function ExportDialog({
   };
   const size = (width: number, height: number) => setOptions((o) => ({ ...o, width, height }));
   return (
-    <Dialog
-      title="Export image"
-      onClose={() => {
-        if (!busy) onClose();
-      }}
-    >
+    <Dialog title="Export image" onClose={onClose}>
       {capture && (
-        <figure className="capture-preview">
+        <figure ref={previewRef} className="capture-preview">
           <img src={capture.url} alt={`Frozen capture ${capture.id}`} />
+          <span className="capture-preview-status" role="status">
+            {busy ? 'Updating preview…' : ''}
+          </span>
           <figcaption>
             Capture {capture.id} · {capture.width} × {capture.height}
             <br />
@@ -47,18 +88,13 @@ export function ExportDialog({
               .map((p) => `Pane ${p.pane}: ${p.mode} ${p.position}/${p.total}`)
               .join(' · ')}
             <br />
-            Frozen image. Refresh to capture a different view or changed output settings.
+            Preview updates automatically when output settings change.
           </figcaption>
         </figure>
       )}
       {capture && capture.signature !== viewSignature() && (
         <p role="status" className="capture-change">
           Viewer changed – this preview is unchanged.
-        </p>
-      )}
-      {capture && JSON.stringify(options) !== JSON.stringify(capture.options) && (
-        <p role="status" className="capture-change">
-          Output settings changed – refresh to apply. Download still uses this preview.
         </p>
       )}
       <div className="form-row">
@@ -191,26 +227,14 @@ export function ExportDialog({
           {error}
         </p>
       )}
+      {(error || (capture && capture.signature !== viewSignature())) && (
+        <button className="full" disabled={busy} onClick={() => setAttempt((n) => n + 1)}>
+          {error ? 'Retry preview' : 'Capture current view'}
+        </button>
+      )}
       <button
         className="primary full"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError('');
-          try {
-            await createCapture(options, workspace);
-          } catch (error) {
-            setError(error instanceof Error ? error.message : 'Export failed. Try a smaller size.');
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        {busy ? 'Rendering…' : 'Refresh preview'}
-      </button>
-      <button
-        className="primary full"
-        disabled={!capture || busy}
+        disabled={!capture || busy || settingsChanged}
         onClick={() => {
           if (capture) {
             download(capture.blob, capture.options.format);

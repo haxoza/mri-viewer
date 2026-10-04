@@ -1157,7 +1157,22 @@ dialog::backdrop {
   cursor: crosshair;
 }
 .capture-preview {
+  position: relative;
   margin: 0 0 16px;
+}
+.capture-preview-status {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 80%);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+}
+.capture-preview-status:empty {
+  opacity: 0;
 }
 .capture-preview img {
   display: block;

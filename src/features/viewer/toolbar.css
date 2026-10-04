@@ -67,6 +67,10 @@
   border-radius: 0 6px 6px 0;
 }
 
+.tools.viewer-toolbar .viewer-tool-segments button[aria-pressed='true'] {
+  border-color: #518b80;
+}
+
 .tools.viewer-toolbar .inline-label,
 .navigation.viewer-navigation .inline-label {
   flex-direction: row;

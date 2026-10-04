@@ -414,6 +414,9 @@ export function executeCommand<N extends CommandName>(
             break;
           }
           case 'set_crosshair': {
+            // A manual/cine navigation may predate this serialized tool call.
+            // Apply the point only after the displayed image is ready.
+            await settle(signal);
             if (
               !(c.viewport instanceof VolumeViewport) &&
               !(useSession.getState().nativeLinks && useSession.getState().panes[index].linked)

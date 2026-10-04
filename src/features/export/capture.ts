@@ -75,6 +75,7 @@ export function createCapture(
   options: ExportOptions,
   workspace: HTMLElement,
   external?: AbortSignal,
+  ignoreInteractionsWithin?: HTMLElement,
 ): Promise<Capture> {
   current?.abort();
   const local = new AbortController();
@@ -86,7 +87,9 @@ export function createCapture(
   ]);
   const run = async () => {
     signal.throwIfAborted();
-    const cleanup = interactionCancellation(local);
+    // The export dialog cancels option changes through its signal; other dialog
+    // interactions (such as locking the aspect ratio) should not cancel a render.
+    const cleanup = interactionCancellation(local, ignoreInteractionsWithin);
     try {
       pause();
       await settle(signal);
@@ -106,8 +109,7 @@ export function createCapture(
       const before = viewSignature();
       const blob = await exportImage(options, workspace, signal);
       signal.throwIfAborted();
-      if (viewSignature() !== before)
-        throw new ViewerError('Capture superseded. Refresh the preview.');
+      if (viewSignature() !== before) throw new ViewerError('Capture superseded. Please retry.');
       const capture: Capture = {
         signature: before,
         id: crypto.randomUUID(),

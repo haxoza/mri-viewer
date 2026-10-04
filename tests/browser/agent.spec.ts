@@ -540,14 +540,15 @@ test('slow frozen export encoding is cancelled without replacing the existing pr
       HTMLCanvasElement.prototype.toBlob = original;
     };
   });
-  await page.getByRole('button', { name: 'Refresh preview' }).click();
+  await page.getByRole('button', { name: '2×', exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => typeof (window as any).__finishEncoding))
     .toBe('function');
-  // A new view supersedes the pending frozen capture; its old image remains downloadable.
+  // A new view supersedes the pending capture; stale output cannot be downloaded.
   expect((await call(page, 'set_slice', { pane: 1, position: 2 })).ok).toBe(true);
   await page.evaluate(() => (window as any).__finishEncoding());
   await expect(page.getByRole('alert')).toContainText('superseded');
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeDisabled();
   await expect(preview).toHaveAttribute('src', originalUrl!);
   expect(await page.evaluate((url) => (window as any).__revoked.has(url), originalUrl)).toBe(false);
   await page.getByRole('button', { name: 'Close dialog' }).click();

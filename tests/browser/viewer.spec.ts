@@ -15,21 +15,14 @@ const files = Array.from({ length: 7 }, (_, i) => ({
   mimeType: 'application/dicom',
   buffer: Buffer.from(dicom(6 - i)),
 }));
-async function refreshPreview(page: Page) {
-  const preview = page.locator('.capture-preview img');
-  const previous = await preview.getAttribute('src');
-  await page.getByRole('button', { name: 'Refresh preview' }).click();
-  // Capture has a 60-second budget; software rendering on CI can exceed the
-  // default five-second assertion timeout. Wait for completion or an error,
-  // then verify a new capture so a failed refresh cannot download stale pixels.
-  await expect(page.getByRole('button', { name: 'Refresh preview' })).toBeEnabled({
+async function waitForPreview(page: Page) {
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled({
     timeout: 65000,
   });
   await expect(page.getByRole('dialog', { name: 'Export image' }).getByRole('alert')).toHaveCount(
     0,
   );
-  await expect(preview).not.toHaveAttribute('src', previous!);
-  await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Refresh preview' })).toHaveCount(0);
 }
 test('local import, navigation, comparison, MPR, and exact-size export', async ({
   page,
@@ -106,7 +99,7 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByLabel('Export width').fill('800');
   await page.getByLabel('Lock aspect ratio').uncheck();
   await page.getByLabel('Export height').fill('600');
-  await refreshPreview(page);
+  await waitForPreview(page);
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download image' }).click();
   const d = await download;
@@ -130,7 +123,7 @@ test('local import, navigation, comparison, MPR, and exact-size export', async (
   await page.getByRole('combobox', { name: /^Capture/ }).selectOption('workspace');
   await page.getByLabel(/^Format/).selectOption('jpeg');
   await page.getByRole('button', { name: '2×', exact: true }).click();
-  await refreshPreview(page);
+  await waitForPreview(page);
   const workspaceDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download image' }).click();
   const jpeg = await workspaceDownload;
@@ -233,7 +226,7 @@ test('MPR export preserves every pane when rendered again', async ({ page }) => 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await page.getByRole('combobox', { name: /^Capture/ }).selectOption(scope);
     await page.getByRole('button', { name: '2×', exact: true }).click();
-    await refreshPreview(page);
+    await waitForPreview(page);
     const download = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download image' }).click();
     await download;
@@ -394,7 +387,7 @@ test('stack exports contain slice pixels in PNG and JPEG', async ({ page }) => {
   for (const format of ['png', 'jpeg']) {
     await page.getByRole('button', { name: 'Export', exact: true }).click();
     await page.getByLabel(/^Format/).selectOption(format);
-    await refreshPreview(page);
+    await waitForPreview(page);
     const download = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download image' }).click();
     await expectImagePixels(page, await readFile((await (await download).path())!));
@@ -585,6 +578,53 @@ test('preview refresh waits for encoding beyond the default assertion timeout', 
       original.call(this, (blob) => setTimeout(() => callback(blob), 6000), ...args);
     };
   });
-  await refreshPreview(page);
+  await page.getByRole('button', { name: '2×', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeDisabled();
+  await waitForPreview(page);
   await expect(page.locator('.capture-preview img')).not.toHaveAttribute('src', previous!);
+});
+
+test('automatic export preview keeps only the latest settings and recovers from invalid dimensions', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByLabel('Open DICOM files').setInputFiles(files);
+  await expect(page.getByLabel('Slice number')).toHaveValue('4');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  const preview = page.locator('.capture-preview img');
+  await expect(preview).toBeVisible();
+  await page.evaluate(() => {
+    const original = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+      HTMLCanvasElement.prototype.toBlob = original;
+      (window as any).__finishEncoding = () => original.call(this, callback, ...args);
+    };
+  });
+  await page.getByRole('button', { name: '2×', exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => typeof (window as any).__finishEncoding))
+    .toBe('function');
+  await page.getByLabel(/^Format/).selectOption('jpeg');
+  await page.getByLabel('Lock aspect ratio').uncheck();
+  await page.getByLabel('Export width').fill('800');
+  await page.getByLabel('Export height').fill('600');
+  await waitForPreview(page);
+  const latest = await preview.getAttribute('src');
+  await page.evaluate(() => (window as any).__finishEncoding());
+  await expect(preview).toHaveAttribute('src', latest!);
+  await expect(preview).toHaveJSProperty('naturalWidth', 800);
+  await expect(preview).toHaveJSProperty('naturalHeight', 600);
+  await page.getByLabel('Export width').fill('0');
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('Use dimensions');
+  await expect(page.getByRole('button', { name: 'Download image' })).toBeDisabled();
+  await page.getByLabel('Export width').fill('640');
+  await waitForPreview(page);
+  await expect(preview).toHaveJSProperty('naturalWidth', 640);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download image' }).click();
+  const image = await download;
+  expect(image.suggestedFilename()).toBe('mri-view.jpg');
+  expect((await readFile((await image.path())!)).subarray(0, 3)).toEqual(
+    Buffer.from([0xff, 0xd8, 0xff]),
+  );
 });

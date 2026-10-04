@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { buildCatalog, allSets } from '../src/imaging/catalog';
-import { nearestLinked, volumeProblem } from '../src/imaging/geometry';
+import { mprPlaneOrder, nearestLinked, volumeProblem } from '../src/imaging/geometry';
+import type { Vec3 } from '../src/imaging/types';
 import { frame } from './fixtures';
 const stack = (indices: number[]) => allSets(buildCatalog(indices.map((i) => frame(i))))[0];
+describe('MPR primary plane', () => {
+  it.each([
+    { normal: [0, 0, 1], primary: 'axial' },
+    { normal: [-1, 0, 0], primary: 'sagittal' },
+    { normal: [0, -1, 0], primary: 'coronal' },
+    { normal: [0.8, 0, 0.6], primary: 'sagittal' },
+    { normal: [0, -0.8, 0.6], primary: 'coronal' },
+  ])('puts $primary first for normal $normal', ({ normal, primary }) => {
+    const order = mprPlaneOrder(normal as Vec3);
+    expect(order[0]).toBe(primary);
+    expect([...order].sort()).toEqual(['axial', 'coronal', 'sagittal']);
+  });
+});
 describe('catalog and patient-space geometry', () => {
   it('groups by identity, splits localizers and dimensions, and sorts spatially', () => {
     const frames = [

@@ -10,7 +10,7 @@ import {
 } from '@cornerstonejs/core';
 import { getSet, notify, paneCount, useSession, type Layout } from '../../app/store';
 import type { DisplaySet, Plane, Vec3 } from '../types';
-import { nearestLinked, dot } from '../geometry';
+import { nearestLinked, dot, mprPlaneOrder } from '../geometry';
 import { initialize, loadFrame, retryFrame } from './runtime';
 import { volumes } from './volumes';
 import { renderAndWait } from './render';
@@ -458,7 +458,8 @@ export async function openMpr(signal?: AbortSignal) {
     // Reserve all references before assigning, so replacing an existing pane cannot evict it.
     [0, 1, 2].forEach((i) => volumes.attach(set.id, i));
     changeLayout('left-3');
-    for (const [i, mode] of (['axial', 'sagittal', 'coronal'] as const).entries()) {
+    useSession.setState({ active: 0 });
+    for (const [i, mode] of mprPlaneOrder(set.normal!).entries()) {
       preparation.signal.throwIfAborted();
       signal?.throwIfAborted();
       await controllers[i].assign(set.id, mode);

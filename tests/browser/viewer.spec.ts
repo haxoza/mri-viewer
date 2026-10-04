@@ -15,6 +15,38 @@ const files = Array.from({ length: 7 }, (_, i) => ({
   mimeType: 'application/dicom',
   buffer: Buffer.from(dicom(6 - i)),
 }));
+for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
+  test(`MPR opens the ${plane} acquisition in the large active pane`, async ({ page }) => {
+    await page.goto('/');
+    await page.getByLabel('Open DICOM files').setInputFiles(
+      Array.from({ length: 7 }, (_, i) => ({
+        name: `slice-${i}`,
+        mimeType: 'application/dicom',
+        buffer: Buffer.from(dicom(i, { plane })),
+      })),
+    );
+    await expect(page.getByLabel('Slice number')).toHaveValue('4');
+    await page.getByRole('button', { name: 'MPR', exact: true }).click();
+    const primary = page.getByRole('region', { name: 'Pane 1', exact: true });
+    await expect(primary.getByText(`${plane} · reconstruction`)).toBeVisible();
+    await expect(page.locator('.pane-status')).toHaveCount(0);
+    await expect(primary).toHaveClass(/active/);
+    const main = await primary.boundingBox();
+    for (const index of [2, 3]) {
+      const preview = await page
+        .getByRole('region', { name: `Pane ${index}`, exact: true })
+        .boundingBox();
+      expect(main!.width * main!.height).toBeGreaterThan(preview!.width * preview!.height);
+    }
+    // Reopening from a smaller pane must still activate the primary plane.
+    await page.getByLabel('Image pane 2.', { exact: false }).click();
+    await expect(page.getByRole('region', { name: 'Pane 2', exact: true })).toHaveClass(/active/);
+    await page.getByRole('button', { name: 'MPR', exact: true }).click();
+    await expect(primary).toHaveClass(/active/);
+    await expect(primary.getByText(`${plane} · reconstruction`)).toBeVisible();
+    await expect(page.locator('.pane-status')).toHaveCount(0);
+  });
+}
 async function waitForPreview(page: Page) {
   await expect(page.getByRole('button', { name: 'Download image' })).toBeEnabled({
     timeout: 65000,

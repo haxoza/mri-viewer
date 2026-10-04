@@ -52,6 +52,40 @@ async function setup(page: Page) {
   await image(page, 1).click({ position: { x: box.width / 2, y: box.height / 2 } });
   await ready(page);
 }
+async function gateRenders(page: Page, indices: number[]) {
+  await page.evaluate((indices) => {
+    const gates = new Map<number, { release: () => void; rendered: () => boolean }>();
+    for (const index of indices) {
+      const element = document.querySelectorAll('.imaging-canvas')[index];
+      const dispatch = element.dispatchEvent.bind(element);
+      let blocked = true;
+      let rendered: Event | undefined;
+      element.dispatchEvent = (event) => {
+        if (blocked && event.type === 'CORNERSTONE_IMAGE_RENDERED') {
+          rendered = event;
+          return true;
+        }
+        return dispatch(event);
+      };
+      gates.set(index, {
+        release: () => {
+          blocked = false;
+          if (rendered) dispatch(rendered);
+        },
+        rendered: () => !!rendered,
+      });
+    }
+    (window as any).__nativeRenderGates = gates;
+  }, indices);
+}
+async function waitForGatedRender(page: Page, index: number) {
+  await expect
+    .poll(() => page.evaluate((i) => (window as any).__nativeRenderGates.get(i).rendered(), index))
+    .toBe(true);
+}
+async function releaseRender(page: Page, index: number) {
+  await page.evaluate((i) => (window as any).__nativeRenderGates.get(i).release(), index);
+}
 test('oblique native click, geometric scroll, independent controls, unlink and parallel fallback', async ({
   page,
 }) => {
@@ -241,4 +275,80 @@ test('relinking during a pending source scroll preserves its requested position'
   });
   await ready(page);
   await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+});
+
+for (const completed of [false, true])
+  test(`hiding a newer native leader restores the ${completed ? 'completed' : 'pending'} surviving scroll`, async ({
+    page,
+  }) => {
+    await setup(page);
+    await gateRenders(page, [0, 1]);
+    await image(page, 1).press('End');
+    await image(page, 2).press('Home');
+    await waitForGatedRender(page, 0);
+    await waitForGatedRender(page, 1);
+    if (completed) {
+      await releaseRender(page, 0);
+      await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+    }
+    await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('single');
+    await expect(page.locator('.imaging-canvas')).toHaveCount(1);
+    if (!completed) await releaseRender(page, 0);
+    await ready(page);
+    await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+    await expect(pane(page, 1).locator('.native-status')).toContainText('offset 0.00 mm');
+    await page.getByRole('combobox', { name: 'Layout', exact: true }).selectOption('columns-2');
+    await ready(page);
+    await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+    await expect(pane(page, 1).locator('.native-status')).toContainText('offset 0.00 mm');
+  });
+
+test('a newer explicit native point wins over a delayed scroll', async ({ page }) => {
+  await setup(page);
+  await gateRenders(page, [0]);
+  await image(page, 1).press('End');
+  await waitForGatedRender(page, 0);
+  const box = (await image(page, 2).boundingBox())!;
+  await image(page, 2).click({ position: { x: box.width / 2, y: box.height / 2 } });
+  const chosen = await pane(page, 2).locator('.native-crosshair circle').getAttribute('cy');
+  await releaseRender(page, 0);
+  await ready(page);
+  await expect(pane(page, 2).locator('.native-crosshair circle')).toHaveAttribute('cy', chosen!);
+  await expect(pane(page, 2).locator('.native-status')).toContainText('offset 0.00 mm');
+  await expect(pane(page, 1).locator('.native-status')).toContainText('Outside acquired coverage');
+});
+
+test('unlinking a pending newer leader releases a completed scroll before independent navigation', async ({
+  page,
+}) => {
+  await setup(page);
+  await gateRenders(page, [0, 1]);
+  await image(page, 1).press('End');
+  await image(page, 2).press('Home');
+  await waitForGatedRender(page, 0);
+  await waitForGatedRender(page, 1);
+  await releaseRender(page, 0);
+  await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+  await page.getByRole('button', { name: 'Link pane 2', exact: true }).click();
+  await expect(pane(page, 1).locator('.native-status')).toContainText('offset 0.00 mm');
+  await image(page, 2).press('End');
+  await releaseRender(page, 1);
+  await ready(page);
+  await expect(pane(page, 2).locator('.pane-position')).toContainText('9 / 9');
+  await expect(pane(page, 1).locator('.native-status')).toContainText('offset 0.00 mm');
+});
+
+test('enabling native links during a pending scroll initializes its shared point on completion', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.getByRole('button', { name: 'Native links', exact: true }).click();
+  await gateRenders(page, [0]);
+  await image(page, 1).press('End');
+  await waitForGatedRender(page, 0);
+  await page.getByRole('button', { name: 'Native links', exact: true }).click();
+  await releaseRender(page, 0);
+  await ready(page);
+  await expect(pane(page, 1).locator('.pane-position')).toContainText('7 / 7');
+  await expect(pane(page, 1).locator('.native-status')).toContainText('offset 0.00 mm');
 });

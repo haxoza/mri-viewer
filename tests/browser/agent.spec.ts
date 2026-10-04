@@ -649,3 +649,29 @@ test('WebMCP configures native links and describes coincident references without
   expect(disabled.panes.every((p: any) => p.nativeLink === null)).toBe(true);
   await expect(page.locator('.native-crosshair')).toHaveCount(0);
 });
+
+test('native crosshair commands wait for a pre-existing pending slice navigation', async ({
+  page,
+}) => {
+  await setup(page);
+  expect((await call(page, 'set_native_links', { enabled: true })).ok).toBe(true);
+  expect((await call(page, 'set_linked', { pane: 1, linked: true })).ok).toBe(true);
+  expect((await call(page, 'set_crosshair', { pane: 1, x: 0.5, y: 0.5 })).ok).toBe(true);
+  const image = page.getByLabel('Image pane 1.', { exact: false });
+  const box = (await image.boundingBox())!;
+  const result = await page.evaluate(async () => {
+    // Navigation becomes pending synchronously; the tool starts before decoding settles.
+    // No human interaction occurs after the tool begins.
+    document
+      .querySelector('.imaging-canvas')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    return (document as any).modelContext.tools
+      .get('set_crosshair')
+      .execute({ pane: 1, x: 0.4, y: 0.5 }, { signal: new AbortController().signal });
+  });
+  expect(result.ok).toBe(true);
+  expect(result.result.panes[0].displayed).toBe(7);
+  await expect
+    .poll(async () => Number(await page.locator('.native-crosshair circle').getAttribute('cx')))
+    .toBeCloseTo(box.width * 0.4, 1);
+});

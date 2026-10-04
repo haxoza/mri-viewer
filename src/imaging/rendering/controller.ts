@@ -31,6 +31,9 @@ interface Saved {
 }
 let engine: RenderingEngine | undefined;
 let nativeRevision = 0;
+let nativeAppliedRevision = 0;
+const nativeIntents = new Map<number, number>();
+const nativeCompletions = new Map<number, { revision: number; generation: number }>();
 let resizeFrame: number | undefined;
 function scheduleResize() {
   if (resizeFrame !== undefined) return;
@@ -122,6 +125,7 @@ export class ViewportController {
     this.element = undefined;
     volumes.release(this.index);
     patch(this.index, { playing: false, pending: false });
+    retireNativeNavigation(this.index);
   }
   async assign(setId: string, mode: 'stack' | Plane = 'stack', restore = false) {
     const set = getSet(setId);
@@ -155,6 +159,7 @@ export class ViewportController {
       step: undefined,
       relative: undefined,
     });
+    retireNativeNavigation(this.index);
     if (!this.element) return;
     try {
       await initialize(useSession.getState().profile);
@@ -267,16 +272,18 @@ export class ViewportController {
     if (this.abort?.signal.aborted) this.abort = new AbortController();
     if (!this.viewport || !p.total) return;
     index = clamp(index, p.total);
-    if (
+    const native =
       !linked &&
       useSession.getState().nativeLinks &&
       p.linked &&
       p.mode === 'stack' &&
-      this.index < paneCount(useSession.getState().layout)
-    )
-      nativeRevision++;
+      this.index < paneCount(useSession.getState().layout);
+    nativeCompletions.delete(this.index);
+    if (native) nativeIntents.set(this.index, ++nativeRevision);
+    else nativeIntents.delete(this.index);
     this.wanted = { index, linked, revision: nativeRevision };
     patch(this.index, { requested: index, pending: true, error: undefined, linkStatus: undefined });
+    if (!native) reconcileNativeNavigation();
     if (this.busy) return;
     this.busy = true;
     try {
@@ -312,24 +319,29 @@ export class ViewportController {
             crosshairs.set(set.id, point.map((x, k) => x + delta * normal[k]) as Vec3);
             updateCrosshairs(set.id, this.index);
           }
-          if (
-            !isLinked &&
-            this.wanted === undefined &&
-            (!useSession.getState().nativeLinks ||
-              revision === nativeRevision ||
-              !useSession.getState().nativePoint)
-          )
-            sync(this.index, true);
+          if (!isLinked && this.wanted === undefined) {
+            if (nativeIntents.get(this.index) === revision) {
+              nativeIntents.delete(this.index);
+              nativeCompletions.set(this.index, { revision, generation: token });
+              reconcileNativeNavigation();
+            } else if (!useSession.getState().nativeLinks || !useSession.getState().nativePoint)
+              sync(this.index, true);
+          }
           if (v instanceof StackViewport && this.wanted === undefined) {
             const neighbor = target + (target >= state.displayed ? 1 : -1);
             if (set.frames[neighbor]) void loadFrame(set.frames[neighbor].id).catch(() => {});
           }
         } catch {
-          if (token === this.generation)
+          if (token === this.generation) {
             patch(this.index, {
               pending: false,
               error: `Could not decode target ${target + 1}. Retry or choose another position.`,
             });
+            if (nativeIntents.get(this.index) === revision) {
+              nativeIntents.delete(this.index);
+              reconcileNativeNavigation();
+            }
+          }
         }
       }
     } finally {
@@ -369,6 +381,7 @@ export class ViewportController {
       playing: false,
       error: 'View operation cancelled. Retry or choose another position.',
     });
+    retireNativeNavigation(this.index);
   }
   retry() {
     const p = useSession.getState().panes[this.index],
@@ -412,6 +425,7 @@ export class ViewportController {
       pending: false,
       error: undefined,
     });
+    retireNativeNavigation(this.index);
   }
 }
 export const controllers = Array.from({ length: 4 }, (_, i) => new ViewportController(i));
@@ -424,9 +438,72 @@ export function pause(index?: number) {
       patch(i, { playing: false });
   });
 }
+function retireNativeNavigation(index: number) {
+  nativeIntents.delete(index);
+  nativeCompletions.delete(index);
+  reconcileNativeNavigation();
+}
+function reconcileNativeNavigation() {
+  const state = useSession.getState();
+  if (!state.nativeLinks) return;
+  // Keep completed scrolls while a newer intent is pending. If that intent is
+  // cancelled, the latest surviving scroll can publish its point instead.
+  const completed = [...nativeCompletions.entries()]
+    .filter(([i, completion]) => {
+      const p = state.panes[i],
+        set = getSet(p.setId);
+      return (
+        completion.revision > nativeAppliedRevision &&
+        completion.generation === controllers[i].generation &&
+        i < paneCount(state.layout) &&
+        controllers[i].viewport &&
+        p.linked &&
+        p.mode === 'stack' &&
+        !p.pending &&
+        !p.error &&
+        p.displayed >= 0 &&
+        set &&
+        !nativeGeometryProblem(set)
+      );
+    })
+    .sort((a, b) => b[1].revision - a[1].revision)[0];
+  if (!completed) return;
+  const source = getSet(state.panes[completed[0]].setId)!;
+  if (
+    [...nativeIntents.entries()].some(([i, revision]) => {
+      const p = state.panes[i],
+        target = getSet(p.setId);
+      return (
+        revision > completed[1].revision &&
+        i < paneCount(state.layout) &&
+        controllers[i].viewport &&
+        p.linked &&
+        p.mode === 'stack' &&
+        p.pending &&
+        !p.error &&
+        target &&
+        !nativeCompatibility(source, target)
+      );
+    })
+  )
+    return;
+  nativeAppliedRevision = completed[1].revision;
+  for (const [i, completion] of nativeCompletions)
+    if (completion.revision <= nativeAppliedRevision) nativeCompletions.delete(i);
+  syncNative(completed[0], true);
+}
+useSession.subscribe((state, previous) => {
+  if (
+    state.layout !== previous.layout ||
+    state.panes.some((p, i) => p.linked !== previous.panes[i].linked)
+  )
+    reconcileNativeNavigation();
+});
 export function setNativeLinks(enabled: boolean) {
   if (enabled === useSession.getState().nativeLinks) return;
-  nativeRevision++;
+  nativeAppliedRevision = ++nativeRevision;
+  nativeIntents.clear();
+  nativeCompletions.clear();
   pause();
   useSession.setState({ nativeLinks: enabled, nativePoint: undefined });
   useSession.getState().panes.forEach((_, i) => patch(i, { linkStatus: undefined }));
@@ -541,7 +618,7 @@ export function chooseCrosshair(index: number, x: number, y: number) {
       return;
     }
     pause(index);
-    nativeRevision++;
+    nativeAppliedRevision = ++nativeRevision;
     useSession.setState({
       nativePoint: { setId: set.id, point: projectToNativePlane(frame, point) },
     });

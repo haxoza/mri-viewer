@@ -10,6 +10,14 @@ import {
 } from '@cornerstonejs/core';
 import { getSet, notify, paneCount, useSession, type Layout } from '../../app/store';
 import type { DisplaySet, Plane, Vec3 } from '../types';
+import {
+  nativeCompatibility,
+  nativeGeometryProblem,
+  nearestNative,
+  pixelToPatient,
+  projectToNativePlane,
+  insideNativeImage,
+} from '../nativeGeometry';
 import { nearestLinked, dot, mprPlaneOrder } from '../geometry';
 import { initialize, loadFrame, retryFrame } from './runtime';
 import { volumes } from './volumes';
@@ -22,6 +30,7 @@ interface Saved {
   properties?: ReturnType<StackViewport['getProperties']>;
 }
 let engine: RenderingEngine | undefined;
+let nativeRevision = 0;
 let resizeFrame: number | undefined;
 function scheduleResize() {
   if (resizeFrame !== undefined) return;
@@ -64,7 +73,7 @@ export class ViewportController {
   viewport?: View;
   generation = 0;
   private busy = false;
-  private wanted?: number;
+  private wanted?: { index: number; linked: boolean; revision: number };
   private currentKey = '';
   private saved = new Map<string, Saved>();
   private observer?: ResizeObserver;
@@ -226,9 +235,20 @@ export class ViewportController {
       if (useSession.getState().panes[this.index].linked) {
         const leader = controllers.find(
           (c) =>
-            c.index !== this.index && useSession.getState().panes[c.index].linked && c.viewport,
+            c.index !== this.index &&
+            c.index < paneCount(useSession.getState().layout) &&
+            useSession.getState().panes[c.index].linked &&
+            c.viewport &&
+            (!useSession.getState().nativeLinks ||
+              (useSession.getState().panes[c.index].mode === 'stack' &&
+                useSession.getState().panes[c.index].displayed >= 0 &&
+                !useSession.getState().panes[c.index].pending &&
+                !useSession.getState().panes[c.index].error &&
+                !!getSet(useSession.getState().panes[c.index].setId) &&
+                !nativeCompatibility(getSet(useSession.getState().panes[c.index].setId)!, set))),
         );
         if (leader) sync(leader.index);
+        else if (useSession.getState().nativeLinks) sync(this.index);
       }
     } catch (error) {
       if (token !== this.generation) return;
@@ -247,13 +267,25 @@ export class ViewportController {
     if (this.abort?.signal.aborted) this.abort = new AbortController();
     if (!this.viewport || !p.total) return;
     index = clamp(index, p.total);
-    this.wanted = index;
+    if (
+      !linked &&
+      useSession.getState().nativeLinks &&
+      p.linked &&
+      p.mode === 'stack' &&
+      this.index < paneCount(useSession.getState().layout)
+    )
+      nativeRevision++;
+    this.wanted = { index, linked, revision: nativeRevision };
     patch(this.index, { requested: index, pending: true, error: undefined, linkStatus: undefined });
     if (this.busy) return;
     this.busy = true;
     try {
       while (this.wanted !== undefined) {
-        const target: number = this.wanted;
+        const {
+          index: target,
+          linked: isLinked,
+          revision,
+        }: { index: number; linked: boolean; revision: number } = this.wanted;
         this.wanted = undefined;
         const token = this.generation;
         const v = this.viewport;
@@ -280,7 +312,14 @@ export class ViewportController {
             crosshairs.set(set.id, point.map((x, k) => x + delta * normal[k]) as Vec3);
             updateCrosshairs(set.id, this.index);
           }
-          if (!linked) sync(this.index);
+          if (
+            !isLinked &&
+            this.wanted === undefined &&
+            (!useSession.getState().nativeLinks ||
+              revision === nativeRevision ||
+              !useSession.getState().nativePoint)
+          )
+            sync(this.index, true);
           if (v instanceof StackViewport && this.wanted === undefined) {
             const neighbor = target + (target >= state.displayed ? 1 : -1);
             if (set.frames[neighbor]) void loadFrame(set.frames[neighbor].id).catch(() => {});
@@ -295,7 +334,8 @@ export class ViewportController {
       }
     } finally {
       this.busy = false;
-      if (this.wanted !== undefined) void this.navigate(this.wanted, false, linked);
+      if (this.wanted !== undefined)
+        void this.navigate(this.wanted.index, false, this.wanted.linked);
     }
   }
   updatePosition() {
@@ -384,7 +424,71 @@ export function pause(index?: number) {
       patch(i, { playing: false });
   });
 }
-export function sync(source: number) {
+export function setNativeLinks(enabled: boolean) {
+  if (enabled === useSession.getState().nativeLinks) return;
+  nativeRevision++;
+  pause();
+  useSession.setState({ nativeLinks: enabled, nativePoint: undefined });
+  useSession.getState().panes.forEach((_, i) => patch(i, { linkStatus: undefined }));
+  sync(useSession.getState().active);
+}
+export function syncNative(source: number, navigation = false) {
+  const state = useSession.getState(),
+    p = state.panes[source],
+    set = getSet(p.setId);
+  if (
+    !state.nativeLinks ||
+    p.pending ||
+    p.error ||
+    !p.linked ||
+    p.mode !== 'stack' ||
+    p.displayed < 0 ||
+    !set ||
+    !controllers[source].viewport ||
+    source >= paneCount(state.layout)
+  )
+    return;
+  const problem = nativeGeometryProblem(set);
+  if (problem) {
+    patch(source, { linkStatus: problem });
+    return;
+  }
+  const frame = set.frames[p.displayed];
+  const shared = state.nativePoint,
+    prior = getSet(shared?.setId);
+  let point =
+    shared && prior && !nativeCompatibility(prior, set)
+      ? shared.point
+      : pixelToPatient(frame, (frame.columns - 1) / 2, (frame.rows - 1) / 2);
+  if (navigation || !shared || !prior || nativeCompatibility(prior, set))
+    point = projectToNativePlane(frame, point);
+  useSession.setState({ nativePoint: { setId: set.id, point } });
+  state.panes.forEach((target, i) => {
+    if (
+      !target.linked ||
+      target.mode !== 'stack' ||
+      i >= paneCount(state.layout) ||
+      !controllers[i].viewport ||
+      target.displayed < 0
+    )
+      return;
+    const targetSet = getSet(target.setId);
+    if (!targetSet) return;
+    const match = nearestNative(set, targetSet, point);
+    patch(i, { linkStatus: match.reason });
+    if (
+      match.index !== undefined &&
+      (i !== source || !navigation) &&
+      target.requested !== match.index
+    )
+      void controllers[i].navigate(match.index, false, true);
+  });
+}
+export function sync(source: number, navigation = false) {
+  if (useSession.getState().nativeLinks) {
+    syncNative(source, navigation);
+    return;
+  }
   const state = useSession.getState(),
     p = state.panes[source],
     set = getSet(p.setId);
@@ -420,7 +524,31 @@ export function updateCrosshairs(setId: string, source?: number) {
 export function chooseCrosshair(index: number, x: number, y: number) {
   const c = controllers[index],
     p = useSession.getState().panes[index];
-  if (!(c.viewport instanceof VolumeViewport) || !p.setId) return;
+  if (!p.setId || p.pending || p.error || p.displayed < 0) return;
+  if (c.viewport instanceof StackViewport) {
+    const state = useSession.getState(),
+      set = getSet(p.setId);
+    if (!state.nativeLinks || !p.linked || !set) return;
+    const problem = nativeGeometryProblem(set);
+    if (problem) {
+      patch(index, { linkStatus: problem });
+      return;
+    }
+    const frame = set.frames[p.displayed],
+      point = c.viewport.canvasToWorld([x, y]);
+    if (!insideNativeImage(frame, point)) {
+      notify('Choose a point inside the acquired image.');
+      return;
+    }
+    pause(index);
+    nativeRevision++;
+    useSession.setState({
+      nativePoint: { setId: set.id, point: projectToNativePlane(frame, point) },
+    });
+    syncNative(index);
+    return;
+  }
+  if (!(c.viewport instanceof VolumeViewport)) return;
   pause(index);
   const image = c.viewport.getImageData();
   const point = c.viewport.canvasToWorld([x, y]);

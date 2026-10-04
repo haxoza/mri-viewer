@@ -40,6 +40,10 @@ export function dicom(
     inverted?: boolean;
     series?: number;
     plane?: 'axial' | 'sagittal' | 'coronal';
+    position?: number[];
+    orientation?: number[];
+    spacing?: number[];
+    frameOfReference?: string;
   } = {},
 ) {
   const chunks: Uint8Array[] = [];
@@ -80,14 +84,14 @@ export function dicom(
     sagittal: { position: [index * 2, 0, 0], orientation: [0, 1, 0, 0, 0, 1] },
     coronal: { position: [0, index * 2, 0], orientation: [1, 0, 0, 0, 0, -1] },
   }[options.plane ?? 'axial'];
-  element(0x20, 0x32, 'DS', geometry.position.join('\\'));
-  element(0x20, 0x37, 'DS', geometry.orientation.join('\\'));
-  element(0x20, 0x52, 'UI', '1.2.3.99');
+  element(0x20, 0x32, 'DS', (options.position ?? geometry.position).join('\\'));
+  element(0x20, 0x37, 'DS', (options.orientation ?? geometry.orientation).join('\\'));
+  element(0x20, 0x52, 'UI', options.frameOfReference ?? '1.2.3.99');
   element(0x28, 2, 'US', 1);
   element(0x28, 4, 'CS', options.inverted ? 'MONOCHROME1' : 'MONOCHROME2');
   element(0x28, 0x10, 'US', 32);
   element(0x28, 0x11, 'US', 32);
-  element(0x28, 0x30, 'DS', '1\\1');
+  element(0x28, 0x30, 'DS', (options.spacing ?? [1, 1]).join('\\'));
   element(0x28, 0x100, 'US', 16);
   element(0x28, 0x101, 'US', 16);
   element(0x28, 0x102, 'US', 15);

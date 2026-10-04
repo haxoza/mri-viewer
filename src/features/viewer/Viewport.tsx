@@ -15,6 +15,7 @@ import { WheelSteps } from '../../imaging/tools/navigation';
 import { direction } from '../../imaging/geometry';
 import { panView, zoomView, windowView } from '../../app/viewActions';
 import { AnnotationOverlay } from '../annotations/AnnotationOverlay';
+import { NativeOverlay } from './NativeOverlay';
 import './viewport.css';
 export function Viewport({ index }: { index: number }) {
   const element = useRef<HTMLDivElement>(null);
@@ -268,6 +269,7 @@ export function Viewport({ index }: { index: number }) {
         </>
       )}
       <AnnotationOverlay index={index} />
+      <NativeOverlay index={index} />
       {cross && p.mode !== 'stack' && (
         <svg className="crosshair" aria-hidden="true">
           <path d={`M ${cross[0]} 0 V 10000 M 0 ${cross[1]} H 10000`} />

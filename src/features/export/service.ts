@@ -4,8 +4,18 @@ import { renderAndWait } from '../../imaging/rendering/render';
 import { useMarks } from '../annotations/model';
 import { Enums, StackViewport, VolumeViewport, type Types } from '@cornerstonejs/core';
 import { controllers, crosshairs, pause } from '../../imaging/rendering/controller';
-import { paneCount, useSession } from '../../app/store';
+import { getSet, paneCount, useSession } from '../../app/store';
 import { volumes } from '../../imaging/rendering/volumes';
+import {
+  nativeCompatibility,
+  nativeReference,
+  nativeReferenceLabel,
+  nativeReferenceColors,
+  nearestNative,
+  insideNativeImage,
+  projectToNativePlane,
+  planeOffset,
+} from '../../imaging/nativeGeometry';
 import { budgets } from '../../imaging/types';
 export interface ExportOptions {
   scope: 'active' | 'workspace';
@@ -56,6 +66,7 @@ export async function exportImage(
       : selected[0].element!.getBoundingClientRect();
   const snapshots = selected.map((c) => ({
     index: c.index,
+    linked: state.panes[c.index].linked,
     marks: structuredClone(useMarks.getState().panes[c.index]),
     mode: state.panes[c.index].mode,
     setId: state.panes[c.index].setId!,
@@ -150,6 +161,90 @@ export async function exportImage(
           x + 12,
           y + 24 * scale,
         );
+        if (s.mode === 'stack' && s.linked && state.nativeLinks && state.nativePoint) {
+          const shared = state.nativePoint,
+            source = getSet(shared.setId),
+            target = getSet(s.setId);
+          if (source && target) {
+            const match = nearestNative(source, target, shared.point);
+            const frame = target.frames[s.displayed];
+            const offset = match.reason ? 0 : Math.abs(planeOffset(frame, shared.point));
+            const outside =
+              match.outside || (!match.reason && !insideNativeImage(frame, shared.point));
+            context.save();
+            context.beginPath();
+            context.rect(x, y, w, h);
+            context.clip();
+            context.fillStyle = '#f2d49b';
+            context.font = `${Math.max(10, 11 * scale)}px system-ui`;
+            const label =
+              match.reason ??
+              `Native ${s.displayed === match.index ? 'nearest-slice' : 'displayed-slice'} offset ${offset.toFixed(2)} mm${outside ? ' · Outside acquired coverage' : ''}`;
+            context.fillText(label, x + 12, y + 44 * scale);
+            context.fillText(
+              'Experimental · alignment unverified · not for diagnosis',
+              x + 12,
+              y + 60 * scale,
+            );
+            if (!match.reason) {
+              const canvasPoint = (point: Types.Point3) => {
+                const p = v.worldToCanvas(point);
+                return [x + p[0] * devicePixelRatio, y + p[1] * devicePixelRatio];
+              };
+              context.strokeStyle = '#f2c66b';
+              context.setLineDash([6 * scale, 4 * scale]);
+              let lineIndex = 0,
+                noteIndex = 0;
+              state.panes.slice(0, paneCount(state.layout)).forEach((other, i) => {
+                const set = getSet(other.setId);
+                if (
+                  i === s.index ||
+                  !other.linked ||
+                  other.mode !== 'stack' ||
+                  other.pending ||
+                  other.error ||
+                  other.displayed < 0 ||
+                  !set ||
+                  nativeCompatibility(target, set)
+                )
+                  return;
+                const reference = nativeReference(frame, set.frames[other.displayed]);
+                context.strokeStyle = nativeReferenceColors[i];
+                context.fillStyle = nativeReferenceColors[i];
+                if (reference.relation !== 'intersecting') {
+                  context.fillText(
+                    `Pane ${i + 1}: ${nativeReferenceLabel(reference)}`,
+                    x + 12,
+                    y + (78 + noteIndex++ * 16) * scale,
+                  );
+                  return;
+                }
+                const [a, b] = reference.segment.map(canvasPoint);
+                context.beginPath();
+                context.moveTo(a[0], a[1]);
+                context.lineTo(b[0], b[1]);
+                context.stroke();
+                context.fillText(
+                  `Pane ${i + 1}`,
+                  (a[0] + b[0]) / 2 + 8,
+                  (a[1] + b[1]) / 2 - 8 - lineIndex++ * 16 * scale,
+                );
+              });
+              if (insideNativeImage(frame, shared.point)) {
+                const [px, py] = canvasPoint(projectToNativePlane(frame, shared.point));
+                context.strokeStyle = '#76dacb';
+                context.setLineDash(offset > 0.01 || outside ? [3 * scale, 3 * scale] : []);
+                context.beginPath();
+                context.moveTo(px - 12 * scale, py);
+                context.lineTo(px + 12 * scale, py);
+                context.moveTo(px, py - 12 * scale);
+                context.lineTo(px, py + 12 * scale);
+                context.stroke();
+              }
+            }
+            context.restore();
+          }
+        }
         if (s.mode !== 'stack' && s.point) {
           const point = v.worldToCanvas(s.point as Types.Point3);
           const px = x + point[0] * devicePixelRatio,

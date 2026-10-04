@@ -41,11 +41,66 @@ export default function App() {
     folder = useRef<HTMLInputElement>(null),
     zip = useRef<HTMLInputElement>(null),
     workspace = useRef<HTMLDivElement>(null),
+    openOptions = useRef<HTMLDetailsElement>(null),
+    settings = useRef<HTMLDetailsElement>(null),
+    sidebarPreferences = useRef({ desktop: sidebar, compact: false }),
     abort = useRef<AbortController | undefined>(undefined);
   const workspaceRef = useCallback((element: HTMLDivElement | null) => {
     workspace.current = element;
     setExportWorkspace(element);
   }, []);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      for (const ref of [openOptions, settings]) {
+        if (ref.current?.open && !ref.current.contains(event.target as Node))
+          ref.current.open = false;
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest('dialog')) return;
+      for (const ref of [openOptions, settings]) {
+        if (ref.current?.open) {
+          ref.current.open = false;
+          ref.current.querySelector('summary')?.focus();
+        }
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, []);
+  useEffect(() => {
+    const compact = window.matchMedia('(max-width: 1100px)');
+    const preferences = sidebarPreferences.current;
+    let compactMode = compact.matches;
+    useSession.setState({ sidebar: compactMode ? preferences.compact : preferences.desktop });
+    const resize = () => {
+      if (compact.matches === compactMode) return;
+      preferences[compactMode ? 'compact' : 'desktop'] = useSession.getState().sidebar;
+      compactMode = compact.matches;
+      useSession.setState({ sidebar: compactMode ? preferences.compact : preferences.desktop });
+    };
+    compact.addEventListener('change', resize);
+    return () => compact.removeEventListener('change', resize);
+  }, []);
+  useEffect(() => {
+    if (!progress?.finished || !progress.accepted || progress.cancelled || progress.issues.length)
+      return;
+    const timer = window.setTimeout(() => setProgress(undefined), 5000);
+    return () => window.clearTimeout(timer);
+  }, [progress]);
+  useEffect(() => {
+    if (notice !== 'MPR ready. Reconstructed detail follows the original acquisition resolution.')
+      return;
+    const timer = window.setTimeout(() => {
+      if (useSession.getState().notice === notice) useSession.setState({ notice: undefined });
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   const importing = !!progress && !progress.finished;
   const start = (files: File[]) => {
     if (importing || !files.length) return;
@@ -82,39 +137,57 @@ export default function App() {
           <div>
             Local MRI <span>VIEWER</span>
           </div>
-          <span className="local-badge">
+          <span className="local-badge" title="DICOM files stay in this browser. No uploads.">
             <i />
             On this device
           </span>
         </div>
-        <div className="import-actions">
-          <button disabled={importing} onClick={() => folder.current?.click()}>
-            Open folder
-          </button>
-          <button disabled={importing} onClick={() => files.current?.click()}>
-            Open files
-          </button>
-          <button disabled={importing} onClick={() => zip.current?.click()}>
-            Open ZIP
-          </button>
-        </div>
+        {hasStudies && (
+          <div className="import-actions">
+            <button disabled={importing} onClick={() => folder.current?.click()}>
+              Open folder
+            </button>
+            <details ref={openOptions} className="open-options">
+              <summary aria-label="More open options">▾</summary>
+              <div className="popover">
+                <button disabled={importing} onClick={() => files.current?.click()}>
+                  Open files
+                </button>
+                <button disabled={importing} onClick={() => zip.current?.click()}>
+                  Open ZIP
+                </button>
+              </div>
+            </details>
+          </div>
+        )}
         <div className="header-end">
-          <AgentTools workspace={workspace} />
-          <select
-            aria-label="Memory profile"
-            value={profile}
-            onChange={(e) => changeProfile(e.target.value as 'standard' | 'low')}
-          >
-            <option value="standard">Standard memory</option>
-            <option value="low">Low memory</option>
-          </select>
-          <button
-            aria-label="Toggle examinations"
-            aria-expanded={sidebar}
-            onClick={() => useSession.setState({ sidebar: !sidebar })}
-          >
-            Examinations
-          </button>
+          {hasStudies && (
+            <button
+              aria-label="Toggle examinations"
+              aria-expanded={sidebar}
+              aria-pressed={sidebar}
+              onClick={() => useSession.setState({ sidebar: !sidebar })}
+            >
+              Examinations
+            </button>
+          )}
+          <details ref={settings} className="session-settings">
+            <summary>Settings</summary>
+            <div className="popover settings-popover">
+              <label>
+                Memory profile
+                <select
+                  aria-label="Memory profile"
+                  value={profile}
+                  onChange={(e) => changeProfile(e.target.value as 'standard' | 'low')}
+                >
+                  <option value="standard">Standard memory</option>
+                  <option value="low">Low memory</option>
+                </select>
+              </label>
+              <AgentTools workspace={workspace} />
+            </div>
+          </details>
         </div>
       </header>
       <input
@@ -152,86 +225,90 @@ export default function App() {
           e.target.value = '';
         }}
       />
-      <Toolbar
-        onScreenshot={(scope) => {
-          if (workspace.current)
-            void executeCommand('capture_view', { scope }, workspace.current).catch((error) =>
-              useSession.setState({
-                notice: error instanceof Error ? error.message : 'Screenshot preparation failed.',
-              }),
-            );
-        }}
-        onMetadata={() => {
-          pause();
-          setDialog('metadata');
-        }}
-        onExport={() => {
-          pause();
-          if (workspace.current)
-            void createCapture(captureDefaults(workspace.current), workspace.current).catch(
-              (error) =>
+      {hasStudies && (
+        <Toolbar
+          onScreenshot={(scope) => {
+            if (workspace.current)
+              void executeCommand('capture_view', { scope }, workspace.current).catch((error) =>
                 useSession.setState({
-                  notice: error instanceof Error ? error.message : 'Capture failed.',
+                  notice: error instanceof Error ? error.message : 'Screenshot preparation failed.',
                 }),
-            );
-        }}
-      />
-      {progress && (
-        <div className="import-status" role="status">
-          <span>
-            {progress.finished
-              ? `${progress.accepted} frames imported${progress.cancelled ? ' · cancelled, partial results retained' : ''}`
-              : `Indexing ${progress.done} / ${progress.total} files…`}
-          </span>
-          <progress max={Math.max(1, progress.total)} value={progress.done} />
-          {progress.duplicates > 0 && <span>{progress.duplicates} duplicates skipped</span>}
-          {progress.issues.length > 0 && (
-            <details>
-              <summary>{progress.issues.length} import issues</summary>
-              <div className="popover import-issues">
-                {progress.issues.map((issue, i) => (
-                  <p key={i}>{issue}</p>
-                ))}
-              </div>
-            </details>
-          )}
-          {!progress.finished ? (
-            <button onClick={() => abort.current?.abort()}>Cancel import</button>
-          ) : (
-            <button aria-label="Dismiss import status" onClick={() => setProgress(undefined)}>
-              ✕
-            </button>
-          )}
-        </div>
-      )}
-      {notice && (
-        <div className="notice" role="status">
-          <span>{notice}</span>
-          {notice.startsWith('Preparing') && (
-            <button
-              onClick={() => {
-                cancelMpr();
-                useSession.setState({
-                  notice: 'MPR preparation cancelled. Stack viewing remains available.',
-                });
-              }}
-            >
-              Cancel MPR
-            </button>
-          )}
-          <button
-            aria-label="Dismiss notice"
-            onClick={() => useSession.setState({ notice: undefined })}
-          >
-            ✕
-          </button>
-        </div>
+              );
+          }}
+          onMetadata={() => {
+            pause();
+            setDialog('metadata');
+          }}
+          onExport={() => {
+            pause();
+            if (workspace.current)
+              void createCapture(captureDefaults(workspace.current), workspace.current).catch(
+                (error) =>
+                  useSession.setState({
+                    notice: error instanceof Error ? error.message : 'Capture failed.',
+                  }),
+              );
+          }}
+        />
       )}
       {screenshot && <ScreenshotBar />}
-      <main className={sidebar ? 'with-sidebar' : ''}>
+      <main className={hasStudies && sidebar ? 'with-sidebar' : ''}>
+        <div className="status-overlay">
+          {progress && (
+            <div className="import-status" role="status">
+              <span>
+                {progress.finished
+                  ? `${progress.accepted} frames imported${progress.cancelled ? ' · cancelled, partial results retained' : ''}`
+                  : `Indexing ${progress.done} / ${progress.total} files…`}
+              </span>
+              <progress max={Math.max(1, progress.total)} value={progress.done} />
+              {progress.duplicates > 0 && <span>{progress.duplicates} duplicates skipped</span>}
+              {progress.issues.length > 0 && (
+                <details>
+                  <summary>{progress.issues.length} import issues</summary>
+                  <div className="popover import-issues">
+                    {progress.issues.map((issue, i) => (
+                      <p key={i}>{issue}</p>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {!progress.finished ? (
+                <button onClick={() => abort.current?.abort()}>Cancel import</button>
+              ) : (
+                <button aria-label="Dismiss import status" onClick={() => setProgress(undefined)}>
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+          {notice && (
+            <div className="notice" role="status">
+              <span>{notice}</span>
+              {notice.startsWith('Preparing') && (
+                <button
+                  onClick={() => {
+                    cancelMpr();
+                    useSession.setState({
+                      notice: 'MPR preparation cancelled. Stack viewing remains available.',
+                    });
+                  }}
+                >
+                  Cancel MPR
+                </button>
+              )}
+              <button
+                aria-label="Dismiss notice"
+                onClick={() => useSession.setState({ notice: undefined })}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
         <div
           ref={workspaceRef}
-          className={`workspace layout-${layout}`}
+          className={`workspace layout-${layout} ${hasStudies ? '' : 'workspace-empty'}`}
           data-screenshot-pane={screenshot?.pane}
           style={{ '--split': `${split}%`, '--rest': `${100 - split}%` } as CSSProperties}
         >
@@ -282,34 +359,40 @@ export default function App() {
             />
           )}
           {!hasStudies && (
-            <div className="welcome">
-              <div className="welcome-orbit">◉</div>
-              <span className="eyebrow">YOUR IMAGES. YOUR DEVICE.</span>
-              <h1>
-                A clearer view,
-                <br />
-                kept local.
-              </h1>
-              <p>
-                Explore MRI examinations, compare sequences,
-                <br />
-                and reconstruct in three planes.
-              </p>
-              <button className="primary" onClick={() => folder.current?.click()}>
-                Open an examination
-              </button>
-              <small>
-                Choose a folder, individual DICOM files, or a ZIP.
-                <br />
-                You can also drop files anywhere in this window.
-              </small>
-            </div>
+            <section className="welcome" aria-labelledby="welcome-title">
+              <div className="welcome-panel">
+                <span className="welcome-icon" aria-hidden="true">
+                  ◉
+                </span>
+                <h1 id="welcome-title">Open an examination</h1>
+                <p>View DICOM images and compare series in this browser.</p>
+                <div className="welcome-actions">
+                  <button
+                    className="primary"
+                    disabled={importing}
+                    onClick={() => folder.current?.click()}
+                  >
+                    Open folder
+                  </button>
+                  <button disabled={importing} onClick={() => files.current?.click()}>
+                    Open files
+                  </button>
+                  <button disabled={importing} onClick={() => zip.current?.click()}>
+                    Open ZIP
+                  </button>
+                </div>
+                <p className="welcome-drop">
+                  Or drop a DICOM folder, files, or ZIP anywhere in this window.
+                </p>
+                <small>Your images stay on this device. No uploads.</small>
+              </div>
+            </section>
           )}
         </div>
-        {sidebar && <StudyBrowser importing={importing} />}
+        {hasStudies && sidebar && <StudyBrowser importing={importing} />}
       </main>
       <footer>
-        <span>Session only · No uploads</span>
+        <span>Session only</span>
         <span>Wheel to browse · Drag with the selected tool · Pinch to zoom</span>
         <span>Personal viewing</span>
       </footer>

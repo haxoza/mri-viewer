@@ -1,11 +1,70 @@
 import { viewerActions } from '../../app/actions';
 import { ActionMenu } from '../../app/ActionMenu';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Plane } from '../../imaging/types';
 import { getSet, paneCount, useSession, type Layout, type Tool } from '../../app/store';
 import { getSetSiblings, togglePlay } from '../../imaging/rendering/controller';
 import { editMarks, useMarks, type MarkColor } from '../annotations/model';
 import { parseIndex } from '../../imaging/tools/navigation';
+import { volumeProblem } from '../../imaging/geometry';
+import { usePopoverPosition } from '../../app/usePopoverPosition';
+import './toolbar.css';
+
+function ToolbarPopover({
+  label,
+  name,
+  disabled = false,
+  className = '',
+  children,
+}: {
+  label: ReactNode;
+  name: string;
+  disabled?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const root = useRef<HTMLDetailsElement>(null);
+  const position = usePopoverPosition(root, '.toolbar-popover-content');
+  useEffect(() => {
+    const outside = (event: PointerEvent) => {
+      if (root.current && !root.current.contains(event.target as Node)) root.current.open = false;
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, []);
+  return (
+    <details
+      ref={root}
+      className={`toolbar-popover ${className}`}
+      onToggle={position}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && event.currentTarget.open) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector('summary')?.focus();
+        }
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node))
+          event.currentTarget.open = false;
+      }}
+    >
+      <summary
+        aria-label={name}
+        aria-disabled={disabled || undefined}
+        onClick={(event) => {
+          if (disabled) event.preventDefault();
+        }}
+      >
+        {label}
+      </summary>
+      <fieldset className="popover toolbar-popover-content" disabled={disabled}>
+        {children}
+      </fieldset>
+    </details>
+  );
+}
 export function Toolbar({
   onMetadata,
   onExport,
@@ -20,10 +79,24 @@ export function Toolbar({
     tool = useSession((s) => s.tool),
     layout = useSession((s) => s.layout);
   const color = useMarks((s) => s.color);
+  const hasMarks = useMarks((s) => s.panes[active].length > 0);
+  const canUndoMarks = useMarks((s) => s.history[active].length > 0);
   const hasWorkspaceImage = useSession((s) =>
     s.panes.slice(0, paneCount(s.layout)).some((pane) => pane.setId && pane.displayed >= 0),
   );
   const set = getSet(p.setId);
+  const hasImage = !!set && p.displayed >= 0;
+  const mprProblem = useMemo(() => (set ? volumeProblem(set) : undefined), [set]);
+  const mprDisabledReason = !hasImage
+    ? 'Select a series to prepare MPR views.'
+    : p.pending
+      ? 'Wait for the active image to finish loading.'
+      : mprProblem;
+  const crosshairDisabledReason = !hasImage
+    ? 'Select a series to use the crosshair.'
+    : p.mode === 'stack'
+      ? 'Available in MPR views.'
+      : undefined;
   const [input, setInput] = useState('');
   const [invalid, setInvalid] = useState(false);
   const [announcement, setAnnouncement] = useState('');
@@ -49,12 +122,13 @@ export function Toolbar({
   const siblings = set ? getSetSiblings(set) : [];
   return (
     <>
-      <div className="tools">
-        <div className="tool-group">
+      <div className="tools viewer-toolbar" aria-label="Viewing controls">
+        <div className="tool-group viewer-tool-segments" role="group" aria-label="Image tools">
           {(['slices', 'pan', 'zoom', 'window', 'crosshair', 'ellipse'] as Tool[]).map((t) => (
             <button
               key={t}
-              disabled={t === 'crosshair' && p.mode === 'stack'}
+              disabled={!hasImage || (t === 'crosshair' && !!crosshairDisabledReason)}
+              title={t === 'crosshair' ? crosshairDisabledReason : undefined}
               className={tool === t ? 'selected' : ''}
               aria-pressed={tool === t}
               onClick={() => useSession.setState({ tool: t })}
@@ -72,16 +146,19 @@ export function Toolbar({
             </button>
           ))}
         </div>
-        <div className="tool-group">
-          <button disabled={!set || p.pending} onClick={() => viewerActions.reset(active, false)}>
+        <div className="tool-group toolbar-reset" role="group" aria-label="Image framing">
+          <button
+            disabled={!hasImage || p.pending}
+            onClick={() => viewerActions.reset(active, false)}
+          >
             Fit
           </button>
-          <button disabled={!set || p.pending} onClick={() => viewerActions.reset(active)}>
+          <button disabled={!hasImage || p.pending} onClick={() => viewerActions.reset(active)}>
             Reset
           </button>
         </div>
-        <div className="tool-group">
-          <label className="inline-label">
+        <div className="tool-group toolbar-views" role="group" aria-label="Layout and view">
+          <label className="inline-label toolbar-layout">
             Layout
             <select
               aria-label="Layout"
@@ -98,42 +175,83 @@ export function Toolbar({
               <option value="rows-4">4 · Rows</option>
             </select>
           </label>
-          <button disabled={!set || p.pending} onClick={() => void viewerActions.openMpr()}>
+          <button
+            disabled={!!mprDisabledReason}
+            title={mprDisabledReason ?? 'Open three shared MPR views'}
+            aria-pressed={hasImage && p.mode !== 'stack'}
+            onClick={() => void viewerActions.openMpr()}
+          >
             MPR
           </button>
-          {set && (
+          <label className="inline-label toolbar-view">
+            View
             <select
               aria-label="Viewport mode"
               value={p.mode}
-              disabled={p.pending}
+              disabled={!set || p.pending}
               onChange={(e) =>
                 void viewerActions.assignView(active, p.setId!, e.target.value as 'stack' | Plane)
               }
             >
               <option value="stack">Acquired stack</option>
-              <option value="axial">Axial MPR</option>
-              <option value="sagittal">Sagittal MPR</option>
-              <option value="coronal">Coronal MPR</option>
+              <option value="axial" disabled={!!mprProblem} title={mprProblem}>
+                Axial MPR
+              </option>
+              <option value="sagittal" disabled={!!mprProblem} title={mprProblem}>
+                Sagittal MPR
+              </option>
+              <option value="coronal" disabled={!!mprProblem} title={mprProblem}>
+                Coronal MPR
+              </option>
             </select>
-          )}
+          </label>
         </div>
-        <div
-          className="tool-group"
-          title="Screen marks stay fixed through navigation; no anatomical tracking or measurements."
-        >
-          <select
-            aria-label="Mark color"
-            value={color}
-            onChange={(e) => useMarks.setState({ color: e.target.value as MarkColor })}
+        <div className="tool-group toolbar-marks">
+          <ToolbarPopover
+            name="Marks"
+            disabled={!hasImage}
+            label={
+              <>
+                <span className={`mark-swatch mark-swatch-${color}`} aria-hidden="true" />
+                Marks
+                <span className="mark-color-name">{color}</span>
+              </>
+            }
           >
-            <option value="red">Red</option>
-            <option value="yellow">Yellow</option>
-            <option value="cyan">Cyan</option>
-          </select>
-          <button onClick={() => editMarks(active, { action: 'undo' })}>Undo mark</button>
-          <button onClick={() => editMarks(active, { action: 'clear' })}>Clear marks</button>
+            <label className="inline-label">
+              Mark color
+              <select
+                aria-label="Mark color"
+                value={color}
+                onChange={(e) => useMarks.setState({ color: e.target.value as MarkColor })}
+              >
+                <option value="red">Red</option>
+                <option value="yellow">Yellow</option>
+                <option value="cyan">Cyan</option>
+              </select>
+            </label>
+            <button
+              disabled={!hasImage || !canUndoMarks}
+              onClick={() => editMarks(active, { action: 'undo' })}
+            >
+              Undo mark
+            </button>
+            <button
+              disabled={!hasImage || !hasMarks}
+              onClick={() => editMarks(active, { action: 'clear' })}
+            >
+              Clear marks
+            </button>
+            <small>
+              Screen marks stay fixed through navigation; no anatomical tracking or measurements.
+            </small>
+          </ToolbarPopover>
         </div>
-        <div className="tool-group trailing">
+        <fieldset
+          className="tool-group trailing toolbar-captures"
+          disabled={!hasWorkspaceImage}
+          aria-label="Capture and information"
+        >
           <ActionMenu label="Screenshot view">
             {(close) => (
               <>
@@ -166,23 +284,22 @@ export function Toolbar({
           <button disabled={!set || p.pending || p.displayed < 0} onClick={onExport}>
             Export
           </button>
-        </div>
+        </fieldset>
       </div>
-      <div className="navigation">
+      <div className="navigation viewer-navigation" aria-label="Slice navigation and cine">
         <span className="active-caption">
-          PANE {active + 1}
-          <small>{p.mode === 'stack' ? 'Slice' : 'Plane position'}</small>
+          Pane {active + 1} · {p.mode === 'stack' ? 'Slice' : 'Plane position'}
         </span>
         <button
           aria-label="First slice"
-          disabled={!p.total || p.requested === 0}
+          disabled={!hasImage || !p.total || p.requested === 0}
           onClick={() => void viewerActions.setSlice(active, 0)}
         >
           Ⅰ‹
         </button>
         <button
           aria-label="Previous slice"
-          disabled={!p.total || p.requested === 0}
+          disabled={!hasImage || !p.total || p.requested === 0}
           onClick={() => void viewerActions.setSlice(active, p.requested - 1)}
         >
           ‹
@@ -194,7 +311,7 @@ export function Toolbar({
           min="0"
           max={Math.max(0, p.total - 1)}
           value={p.requested}
-          disabled={p.total < 2}
+          disabled={!hasImage || p.total < 2}
           onChange={(e) => void viewerActions.setSlice(active, Number(e.target.value))}
         />
         <div className="index-input">
@@ -203,7 +320,7 @@ export function Toolbar({
             aria-invalid={invalid}
             inputMode="numeric"
             value={input}
-            disabled={!p.total}
+            disabled={!hasImage || !p.total}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') submit();
@@ -221,14 +338,14 @@ export function Toolbar({
         </div>
         <button
           aria-label="Next slice"
-          disabled={!p.total || p.requested >= p.total - 1}
+          disabled={!hasImage || !p.total || p.requested >= p.total - 1}
           onClick={() => void viewerActions.setSlice(active, p.requested + 1)}
         >
           ›
         </button>
         <button
           aria-label="Last slice"
-          disabled={!p.total || p.requested >= p.total - 1}
+          disabled={!hasImage || !p.total || p.requested >= p.total - 1}
           onClick={() => void viewerActions.setSlice(active, p.total - 1)}
         >
           ›Ⅰ
@@ -236,72 +353,69 @@ export function Toolbar({
         <div className="cine-controls">
           <button
             aria-label={p.playing ? 'Pause cine' : 'Play cine'}
-            disabled={!set || p.total < 2}
+            disabled={!hasImage || p.total < 2}
             className={p.playing ? 'selected' : ''}
+            aria-pressed={p.playing}
             onClick={() => togglePlay(active)}
           >
             {p.playing ? 'Ⅱ' : '▶'}
           </button>
-          <label className="inline-label">
-            <input
-              aria-label="Cine frames per second"
-              type="number"
-              min="1"
-              max="60"
-              value={p.fps}
-              onChange={(e) =>
-                useSession
-                  .getState()
-                  .patch(active, { fps: Math.max(1, Math.min(60, Number(e.target.value))) })
-              }
-            />
-            fps
-          </label>
-          <details>
-            <summary aria-label="Playback options">Playback</summary>
-            <div className="popover">
-              {(['reverse', 'loop', 'bounce'] as const).map((key) => (
-                <label className="check" key={key}>
-                  <input
-                    type="checkbox"
-                    checked={p[key]}
-                    onChange={(e) =>
-                      useSession.getState().patch(active, { [key]: e.target.checked })
-                    }
-                  />
-                  {key}
-                </label>
-              ))}
-              <label className="check">
+          <ToolbarPopover label="Playback options" name="Playback options" disabled={!hasImage}>
+            <label className="inline-label">
+              <input
+                aria-label="Cine frames per second"
+                type="number"
+                min="1"
+                max="60"
+                value={p.fps}
+                onChange={(e) =>
+                  useSession
+                    .getState()
+                    .patch(active, { fps: Math.max(1, Math.min(60, Number(e.target.value))) })
+                }
+              />
+              fps
+            </label>
+            {(['reverse', 'loop', 'bounce'] as const).map((key) => (
+              <label className="check" key={key}>
                 <input
                   type="checkbox"
-                  disabled={siblings.length < 2 || p.mode !== 'stack'}
-                  checked={p.temporal}
-                  onChange={(e) =>
-                    useSession.getState().patch(active, { temporal: e.target.checked })
-                  }
+                  checked={p[key]}
+                  onChange={(e) => useSession.getState().patch(active, { [key]: e.target.checked })}
                 />
-                Time playback at fixed position
+                {key}
               </label>
-              <small>Achieved {p.achieved.toFixed(1)} fps</small>
-              <label>
-                Scroll sensitivity
-                <input
-                  aria-label="Scroll sensitivity"
-                  type="range"
-                  min="20"
-                  max="140"
-                  defaultValue={useSession.getState().sensitivity}
-                  onChange={(e) => useSession.setState({ sensitivity: Number(e.target.value) })}
-                />
-              </label>
-            </div>
-          </details>
+            ))}
+            <label className="check">
+              <input
+                type="checkbox"
+                disabled={!hasImage || siblings.length < 2 || p.mode !== 'stack'}
+                checked={p.temporal}
+                onChange={(e) =>
+                  useSession.getState().patch(active, { temporal: e.target.checked })
+                }
+              />
+              Time playback at fixed position
+            </label>
+            <small>Achieved {p.achieved.toFixed(1)} fps</small>
+            <label>
+              Scroll sensitivity
+              <input
+                aria-label="Scroll sensitivity"
+                type="range"
+                min="20"
+                max="140"
+                defaultValue={useSession.getState().sensitivity}
+                onChange={(e) => useSession.setState({ sensitivity: Number(e.target.value) })}
+              />
+            </label>
+          </ToolbarPopover>
         </div>
         {siblings.length > 1 && (
           <label className="inline-label">
             Time
             <select
+              disabled={!hasImage || p.pending}
               value={p.setId}
               onChange={(e) => void viewerActions.assignView(active, e.target.value)}
             >

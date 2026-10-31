@@ -53,8 +53,8 @@ for image results could be revisited if a documented contract becomes available.
   instead of discarding a frozen export or capturing an obscuring dialog.
 - **Export** remains a separate frozen-image workflow. It opens a preview with
   capture ID, dimensions and pane positions. Navigation leaves it unchanged;
-  a warning identifies changes in the viewer or output settings. Choose
-  **Refresh preview** to apply them. **Download image** always downloads the
+  output-setting changes automatically refresh the preview. If the viewer changes,
+  choose **Capture current view** to update it. Failed captures offer **Retry preview**. **Download image** always downloads the
   displayed capture, including its format/dimensions, then closes the dialog.
   Only one frozen image is retained; replacement/close revokes its object URL.
 
@@ -72,6 +72,7 @@ filenames and unrestricted metadata/free text.
 | `assign_view` | `pane`, `displaySet` alias, `mode`: acquired/axial/sagittal/coronal |
 | `set_slice` | `pane`, `position` |
 | `set_view` | `pane`; optional `width` + `center`, `zoom` (0.05–30), `dx` + `dy` in CSS pixels, `operation`: fit/reset |
+| `set_native_links` | `enabled` boolean |
 | `set_linked` | `pane`, `linked` boolean |
 | `open_mpr` | `pane` |
 | `set_crosshair` | `pane`, normalized `x`, `y` |
@@ -148,3 +149,7 @@ tests now wait for refresh completion within that budget, check for an error and
 require a new preview URL before downloading. Download event listeners start
 only after refresh succeeds, avoiding secondary errors when refresh fails.
 The two workflows with multiple MPR captures also have a longer overall test budget.
+
+## Linked native series
+
+WebMCP can configure native linking without toolbar interaction: call `set_layout`, `assign_view` with `mode: "acquired"`, `set_native_links({"enabled": true})`, and `set_linked` for each pane. Then use `set_crosshair` with normalized pane coordinates and `set_slice` for physical navigation. Repeating `set_native_links` with the current value preserves the selected point. `get_viewer_state` reports `nativeLinks`, catalog `nativeLinkable`, and per-pane `nativeLink` status, nearest slice, displayed-plane offset in mm, coverage and reference relationships (`intersecting`, `coincident`, `parallel`, `outside-image`, or `incompatible`). These diagnostics expose neither identifiers nor patient-space coordinates. Set `enabled: false` to restore parallel-stack linking. The private verifier's optional `--three` flag also checks the third coronal series and coincident-reference annotations.
